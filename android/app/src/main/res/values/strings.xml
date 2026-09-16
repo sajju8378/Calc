@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Calculator</string>
+    <string name="accessibility_service_label">Calculator AppBlocker Shield</string>
+    <string name="accessibility_service_description">Used exclusively to detect foreground transitions of protected applications to present the digital wellbeing blocking shield. It does not inspect text, keystrokes, personal messages, or passwords.</string>
+    <string name="device_admin_label">Calculator Tamper Protection</string>
+    <string name="device_admin_description">Prevents unauthorized uninstallation without administrator authentication.</string>
+</resources>

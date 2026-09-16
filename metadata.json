@@ -1,0 +1,6 @@
+{
+  "name": "Calculator AppBlocker",
+  "description": "A privacy-first, non-destructive disguised calculator and digital wellbeing app-blocking tool for Android 12 / Samsung Galaxy M31.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
