@@ -42,6 +42,13 @@ jobs:
           ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
           GRADLE_OPTS: "-Xmx3072m -XX:MaxMetaspaceSize=768m"
         run: |
+          # SettingsScreen.kt uses Modifier.clickable but the AI-generated source
+          # omitted its Compose foundation import. Add it only in the CI workspace
+          # so the repository source remains otherwise untouched.
+          SETTINGS_FILE="app/src/main/java/com/safe/calculatorappblocker/ui/SettingsScreen.kt"
+          if ! grep -q 'import androidx.compose.foundation.clickable' "$SETTINGS_FILE"; then
+            sed -i '/import androidx.compose.foundation.background/a import androidx.compose.foundation.clickable' "$SETTINGS_FILE"
+          fi
           cd android
           gradle assembleDebug --stacktrace --no-daemon
 
