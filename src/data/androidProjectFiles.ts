@@ -712,15 +712,17 @@ jobs:
           java-version: '17'
       - uses: android-actions/setup-android@v3
       - uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: 8.5
       - name: Build Android APK
         run: |
           cd android
-          chmod +x gradlew 2>/dev/null || true
-          gradle assembleDebug --stacktrace
+          gradle assembleDebug --no-daemon --stacktrace
       - name: Prepare APK Artifact
         run: |
           mkdir -p release-artifacts
           find android/app/build/outputs/apk/debug -name "*.apk" -exec cp {} release-artifacts/CalculatorAppBlocker.apk \\;
+          ls -la release-artifacts/
       - uses: actions/upload-artifact@v4
         with:
           name: CalculatorAppBlocker-Android-APK
