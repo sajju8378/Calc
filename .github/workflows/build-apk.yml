@@ -17,16 +17,18 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup Java 17
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v3
-        with:
-          gradle-version: '8.5'
-          cache-disabled: true
+      - name: Setup Gradle 8.5
+        run: |
+          echo "Downloading official Gradle 8.5 distribution..."
+          curl -sL https://services.gradle.org/distributions/gradle-8.5-bin.zip -o /tmp/gradle-8.5-bin.zip
+          unzip -q /tmp/gradle-8.5-bin.zip -d /opt/
+          echo "/opt/gradle-8.5/bin" >> $GITHUB_PATH
+          /opt/gradle-8.5/bin/gradle -v
 
       - name: Configure Android SDK
         run: |
@@ -38,6 +40,7 @@ jobs:
         env:
           ANDROID_HOME: /usr/local/lib/android/sdk
           ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+          GRADLE_OPTS: "-Xmx3072m -XX:MaxMetaspaceSize=768m"
         run: |
           cd android
           gradle assembleDebug --stacktrace --no-daemon
