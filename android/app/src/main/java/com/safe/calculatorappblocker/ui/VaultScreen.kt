@@ -3,10 +3,8 @@ package com.safe.calculatorappblocker.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Block
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -34,7 +32,7 @@ fun VaultScreen(
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
-                            imageVector = Icons.Default.Shield,
+                            imageVector = Icons.Default.Lock,
                             contentDescription = null,
                             tint = Color(0xFF10B981),
                             modifier = Modifier.size(24.dp)
@@ -82,7 +80,7 @@ fun VaultScreen(
                 NavigationBarItem(
                     selected = selectedTab == VaultTab.APP_BLOCKER,
                     onClick = { selectedTab = VaultTab.APP_BLOCKER },
-                    icon = { Icon(Icons.Default.Block, contentDescription = "App Blocker") },
+                    icon = { Icon(Icons.Default.Lock, contentDescription = "App Blocker") },
                     label = { Text("App Blocker", fontWeight = if (selectedTab == VaultTab.APP_BLOCKER) FontWeight.Bold else FontWeight.Normal) },
                     colors = NavigationBarItemDefaults.colors(
                         selectedIconColor = Color.White,
@@ -95,7 +93,7 @@ fun VaultScreen(
                 NavigationBarItem(
                     selected = selectedTab == VaultTab.SETTINGS,
                     onClick = { selectedTab = VaultTab.SETTINGS },
-                    icon = { Icon(Icons.Default.Settings, contentDescription = "Settings") },
+                    icon = { Icon(Icons.Default.Edit, contentDescription = "Settings") },
                     label = { Text("Settings", fontWeight = if (selectedTab == VaultTab.SETTINGS) FontWeight.Bold else FontWeight.Normal) },
                     colors = NavigationBarItemDefaults.colors(
                         selectedIconColor = Color.White,

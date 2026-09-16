@@ -9,9 +9,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.Security
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -275,7 +275,7 @@ fun SetupPasswordScreen(
                 shape = RoundedCornerShape(14.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981))
             ) {
-                Icon(Icons.Default.Security, contentDescription = null, tint = Color.White)
+                Icon(Icons.Default.Lock, contentDescription = null, tint = Color.White)
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
                     text = "Save Password & Lock Vault",
@@ -292,7 +292,7 @@ fun SetupPasswordScreen(
             onDismissRequest = { /* forced close */ },
             icon = {
                 Icon(
-                    Icons.Default.CheckCircle,
+                    Icons.Default.Check,
                     contentDescription = null,
                     tint = Color(0xFF10B981),
                     modifier = Modifier.size(48.dp)

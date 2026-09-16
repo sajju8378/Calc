@@ -15,7 +15,6 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -118,7 +117,7 @@ fun DashboardScreen(
                         Icon(Icons.Default.Add, contentDescription = "Add Any App", tint = Color.White)
                     }
                     IconButton(onClick = { refreshAppsList() }) {
-                        Icon(Icons.Default.Refresh, contentDescription = "Refresh Apps", tint = Color.White)
+                        Icon(Icons.Default.Check, contentDescription = "Refresh Apps", tint = Color.White)
                     }
                     IconButton(onClick = onLock) {
                         Icon(Icons.Default.Lock, contentDescription = "Lock", tint = Color(0xFFEF4444))

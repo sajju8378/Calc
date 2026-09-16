@@ -11,11 +11,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.Security
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -73,7 +70,7 @@ fun SettingsScreen() {
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Key, contentDescription = null, tint = Color(0xFF10B981))
+                    Icon(Icons.Default.Lock, contentDescription = null, tint = Color(0xFF10B981))
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
                         text = "Change Calculator Password",
@@ -198,7 +195,7 @@ fun SettingsScreen() {
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Security, contentDescription = null, tint = Color(0xFF38BDF8))
+                    Icon(Icons.Default.Lock, contentDescription = null, tint = Color(0xFF38BDF8))
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
                         text = "Security Question",
@@ -247,7 +244,7 @@ fun SettingsScreen() {
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF10B981))
+                    Icon(Icons.Default.Check, contentDescription = null, tint = Color(0xFF10B981))
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
                         text = "System Accessibility Service",
