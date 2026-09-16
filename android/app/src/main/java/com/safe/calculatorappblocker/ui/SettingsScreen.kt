@@ -365,20 +365,22 @@ fun SettingsScreen() {
 
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    ExposedDropdownMenuBox(
-                        expanded = questionDropdownExpanded,
-                        onExpandedChange = { questionDropdownExpanded = !questionDropdownExpanded },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
+                    Box(modifier = Modifier.fillMaxWidth()) {
                         OutlinedTextField(
                             value = selectedNewQuestion,
                             onValueChange = {},
                             readOnly = true,
                             label = { Text("New Question") },
-                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = questionDropdownExpanded) },
-                            modifier = Modifier.menuAnchor().fillMaxWidth()
+                            trailingIcon = {
+                                IconButton(onClick = { questionDropdownExpanded = !questionDropdownExpanded }) {
+                                    Icon(Icons.Default.Info, contentDescription = "Select question", tint = Color(0xFF10B981))
+                                }
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { questionDropdownExpanded = true }
                         )
-                        ExposedDropdownMenu(
+                        DropdownMenu(
                             expanded = questionDropdownExpanded,
                             onDismissRequest = { questionDropdownExpanded = false },
                             modifier = Modifier.background(Color(0xFF1E293B))

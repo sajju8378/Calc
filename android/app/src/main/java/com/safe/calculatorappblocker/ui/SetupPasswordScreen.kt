@@ -176,18 +176,24 @@ fun SetupPasswordScreen(
 
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    ExposedDropdownMenuBox(
-                        expanded = questionExpanded,
-                        onExpandedChange = { questionExpanded = !questionExpanded },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
+                    Box(modifier = Modifier.fillMaxWidth()) {
                         OutlinedTextField(
                             value = selectedQuestion,
                             onValueChange = {},
                             readOnly = true,
-                            label = { Text("Question") },
-                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = questionExpanded) },
-                            modifier = Modifier.menuAnchor().fillMaxWidth(),
+                            label = { Text("Security Question") },
+                            trailingIcon = {
+                                IconButton(onClick = { questionExpanded = !questionExpanded }) {
+                                    Icon(
+                                        imageVector = Icons.Default.Info,
+                                        contentDescription = "Select Question",
+                                        tint = Color(0xFF10B981)
+                                    )
+                                }
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { questionExpanded = true },
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedTextColor = Color.White,
                                 unfocusedTextColor = Color.White,
@@ -195,7 +201,7 @@ fun SetupPasswordScreen(
                                 unfocusedBorderColor = Color(0xFF475569)
                             )
                         )
-                        ExposedDropdownMenu(
+                        DropdownMenu(
                             expanded = questionExpanded,
                             onDismissRequest = { questionExpanded = false },
                             modifier = Modifier.background(Color(0xFF1E293B))
