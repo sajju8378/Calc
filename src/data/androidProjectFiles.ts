@@ -659,5 +659,81 @@ cd calculator-appblocker
 adb install app/build/outputs/apk/debug/app-debug.apk
 \`\`\`
 `,
+  },
+  {
+    path: '.github/workflows/deploy.yml',
+    name: 'deploy.yml (GitHub Actions)',
+    category: 'docs',
+    description: 'Automated CI/CD: Builds Vite Web app to GitHub Pages & compiles native Android APK on every push to main',
+    content: `name: Deploy Web App & Build Android APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: 'deploy-and-build'
+  cancel-in-progress: false
+
+jobs:
+  deploy-web:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: \${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+      - run: npm install
+      - run: npm run build
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: './dist'
+      - id: deployment
+        uses: actions/deploy-pages@v4
+
+  build-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v3
+      - name: Build Android APK
+        run: |
+          cd android
+          chmod +x gradlew 2>/dev/null || true
+          gradle assembleDebug --stacktrace
+      - name: Prepare APK Artifact
+        run: |
+          mkdir -p release-artifacts
+          find android/app/build/outputs/apk/debug -name "*.apk" -exec cp {} release-artifacts/CalculatorAppBlocker.apk \\;
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CalculatorAppBlocker-Android-APK
+          path: release-artifacts/CalculatorAppBlocker.apk
+          retention-days: 30
+      - uses: softprops/action-gh-release@v2
+        if: success()
+        with:
+          tag_name: latest-apk
+          name: "Calculator AppBlocker - Latest Android APK"
+          files: release-artifacts/CalculatorAppBlocker.apk
+        env:
+          GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}
+`,
   }
 ];

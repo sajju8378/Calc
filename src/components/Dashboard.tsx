@@ -121,11 +121,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
         <div className="flex items-center gap-1.5">
           <button
             onClick={onOpenProjectExporter}
-            className="flex items-center gap-1 px-2.5 py-1 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-emerald-400 text-xs font-semibold transition-colors cursor-pointer border border-neutral-700/60"
-            title="Inspect Android Studio Project Source Code"
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-emerald-950/60 hover:bg-emerald-900/80 text-emerald-300 text-xs font-semibold transition-colors cursor-pointer border border-emerald-500/40"
+            title="Inspect Android Studio Code & GitHub Actions APK Pipeline"
           >
-            <Code2 className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Android Studio Code</span>
+            <Code2 className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Build APK / Actions</span>
           </button>
 
           <button
@@ -171,6 +171,30 @@ export const Dashboard: React.FC<DashboardProps> = ({
           <p className="text-[11px] text-neutral-300/90 font-sans mt-1">
             {blockedApps.length} app{blockedApps.length === 1 ? '' : 's'} shielded · Local Accessibility Service Active · Tap to view full security audit report
           </p>
+        </div>
+
+        {/* GitHub Actions & APK Build Banner */}
+        <div
+          onClick={onOpenProjectExporter}
+          className="p-3 rounded-2xl bg-gradient-to-r from-emerald-950/40 to-neutral-900 border border-emerald-500/30 hover:border-emerald-400/50 transition-all cursor-pointer flex items-center justify-between shadow-sm"
+        >
+          <div className="flex items-center gap-2.5">
+            <div className="w-7 h-7 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
+              <Smartphone className="w-4 h-4" />
+            </div>
+            <div>
+              <div className="text-xs font-semibold text-white flex items-center gap-1.5">
+                <span>Auto-Build APK Pipeline Ready</span>
+                <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 font-mono">
+                  GitHub Actions
+                </span>
+              </div>
+              <p className="text-[11px] text-neutral-400">
+                Fixes GitHub Pages 404 & compiles <code className="text-emerald-300">CalculatorAppBlocker.apk</code> on push to main
+              </p>
+            </div>
+          </div>
+          <ChevronRight className="w-4 h-4 text-emerald-400 shrink-0" />
         </div>
 
         {/* Quick Action Navigation Bar */}

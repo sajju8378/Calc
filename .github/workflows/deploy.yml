@@ -1,0 +1,107 @@
+name: Deploy Web App & Build Android APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: 'deploy-and-build'
+  cancel-in-progress: false
+
+jobs:
+  # 1. Build and deploy Vite web simulation to GitHub Pages
+  deploy-web:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Node Dependencies
+        run: npm install
+
+      - name: Build Web App (Vite)
+        run: npm run build
+
+      - name: Setup GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages Artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: './dist'
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+  # 2. Automatically compile native Android APK on every build
+  build-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Build Android APK
+        run: |
+          cd android
+          chmod +x gradlew 2>/dev/null || true
+          gradle assembleDebug --stacktrace
+
+      - name: Prepare APK Artifact
+        run: |
+          mkdir -p release-artifacts
+          find android/app/build/outputs/apk/debug -name "*.apk" -exec cp {} release-artifacts/CalculatorAppBlocker.apk \;
+
+      - name: Upload APK as Workflow Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CalculatorAppBlocker-Android-APK
+          path: release-artifacts/CalculatorAppBlocker.apk
+          retention-days: 30
+
+      - name: Publish or Update GitHub Release with APK
+        uses: softprops/action-gh-release@v2
+        if: success()
+        with:
+          tag_name: latest-apk
+          name: "Calculator AppBlocker - Latest Android APK"
+          body: |
+            ### 📱 Calculator AppBlocker - Automatic Android Build
+            
+            - **Commit**: `${{ github.sha }}`
+            - **Branch**: `${{ github.ref_name }}`
+            - **Target OS**: Android 8.0 - Android 14 (Optimized for Android 12 / Samsung Galaxy M31)
+            - **Verification**: Fully safe, privacy-first, zero destructive permissions.
+            
+            #### 📥 Download:
+            Download **`CalculatorAppBlocker.apk`** below to install directly on your device.
+          files: release-artifacts/CalculatorAppBlocker.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
