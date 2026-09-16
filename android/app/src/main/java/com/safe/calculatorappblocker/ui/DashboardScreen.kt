@@ -7,8 +7,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.LockOpen
-import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -50,7 +48,7 @@ fun DashboardScreen(
             TopAppBar(
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Shield, contentDescription = null, tint = Color(0xFF10B981))
+                        Icon(Icons.Default.Lock, contentDescription = null, tint = Color(0xFF10B981))
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("AppBlocker Vault", fontSize = 18.sp, fontWeight = FontWeight.Bold)
                     }

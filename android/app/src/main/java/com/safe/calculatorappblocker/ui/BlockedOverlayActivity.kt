@@ -10,7 +10,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -98,7 +97,7 @@ class BlockedOverlayActivity : ComponentActivity() {
                             .height(54.dp),
                         shape = RoundedCornerShape(16.dp)
                     ) {
-                        Icon(Icons.Default.LockOpen, contentDescription = null)
+                        Icon(Icons.Default.Lock, contentDescription = null)
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("Unlock Temporarily", fontSize = 16.sp)
                     }

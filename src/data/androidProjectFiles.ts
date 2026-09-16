@@ -680,13 +680,23 @@ jobs:
       contents: write
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
       - name: Setup Java 17
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Configure Android SDK & Licenses
+        run: |
+          mkdir -p android
+          echo "sdk.dir=$ANDROID_HOME" > android/local.properties
+          yes | sdkmanager --licenses || true
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
@@ -696,22 +706,31 @@ jobs:
       - name: Build Android Debug APK
         run: |
           cd android
-          gradle assembleDebug --no-daemon --stacktrace
+          gradle assembleDebug --stacktrace --no-daemon
 
       - name: Locate and Archive APK
         run: |
           mkdir -p artifacts
           APK_PATH=$(find android/app/build/outputs/apk/debug -name "*.apk" | head -n 1)
-          cp "$APK_PATH" artifacts/CalculatorAppBlocker.apk
+          if [ -n "$APK_PATH" ] && [ -f "$APK_PATH" ]; then
+            echo "Found APK: $APK_PATH"
+            cp "$APK_PATH" artifacts/CalculatorAppBlocker.apk
+          else
+            echo "Error: No APK was generated in android/app/build/outputs/apk/debug"
+            exit 1
+          fi
 
-      - uses: actions/upload-artifact@v4
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
         with:
           name: CalculatorAppBlocker-Android-APK
           path: artifacts/CalculatorAppBlocker.apk
           retention-days: 30
 
-      - uses: softprops/action-gh-release@v2
+      - name: Release APK
+        uses: softprops/action-gh-release@v2
         if: success()
+        continue-on-error: true
         with:
           tag_name: latest-apk
           name: "Calculator AppBlocker - Latest Android APK"
