@@ -11,6 +11,7 @@ import com.safe.calculatorappblocker.ui.BlockedOverlayActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import java.util.concurrent.atomic.AtomicReference
 
@@ -74,8 +75,7 @@ class AppBlockerAccessibilityService : AccessibilityService() {
         lastOverlayPackage = packageName
         lastOverlayTime = now
 
-        // Accessibility callbacks normally run on the main thread, but explicitly post here
-        // so the Activity launch is always performed from the UI thread.
+        // Explicitly post here so the Activity launch is always performed from the UI thread.
         mainHandler.post {
             launchBlockingOverlay(packageName)
         }
@@ -103,7 +103,7 @@ class AppBlockerAccessibilityService : AccessibilityService() {
     }
 
     override fun onDestroy() {
-        serviceScope.coroutineContext.cancel()
+        serviceScope.cancel()
         super.onDestroy()
     }
 
