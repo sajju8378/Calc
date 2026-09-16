@@ -4,7 +4,9 @@ import android.content.Context
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import java.util.concurrent.ConcurrentHashMap
 
 private val Context.dataStore by preferencesDataStore(name = "blocker_rules")
@@ -24,6 +26,17 @@ class BlockedAppsRepository private constructor(private val context: Context) {
         val prefs = context.dataStore.data.first()
         val blocked = prefs[KEY_BLOCKED_PACKAGES] ?: emptySet()
         return blocked.contains(packageName)
+    }
+
+    suspend fun getBlockedPackages(): Set<String> {
+        val prefs = context.dataStore.data.first()
+        return prefs[KEY_BLOCKED_PACKAGES] ?: emptySet()
+    }
+
+    fun getBlockedPackagesFlow(): Flow<Set<String>> {
+        return context.dataStore.data.map { prefs ->
+            prefs[KEY_BLOCKED_PACKAGES] ?: emptySet()
+        }
     }
 
     suspend fun setPackageBlocked(packageName: String, isBlocked: Boolean) {

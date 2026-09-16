@@ -684,26 +684,26 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup Java 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: 'temurin'
           java-version: '17'
-
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Configure Android SDK & Licenses
-        run: |
-          mkdir -p android
-          echo "sdk.dir=$ANDROID_HOME" > android/local.properties
-          yes | sdkmanager --licenses || true
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
         with:
           gradle-version: '8.5'
 
+      - name: Configure Android SDK
+        run: |
+          mkdir -p android
+          echo "sdk.dir=\${ANDROID_HOME:-/usr/local/lib/android/sdk}" > android/local.properties
+          cat android/local.properties
+
       - name: Build Android Debug APK
+        env:
+          ANDROID_HOME: /usr/local/lib/android/sdk
+          ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
         run: |
           cd android
           gradle assembleDebug --stacktrace --no-daemon
