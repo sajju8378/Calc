@@ -28,10 +28,12 @@ import {
 } from 'lucide-react';
 import { AppItem, BlockerConfig, ProtectionLevel } from '../types';
 import { computeProtectionLevel } from '../utils/security';
+import { SettingsTab } from './SettingsTab';
 
 interface DashboardProps {
   apps: AppItem[];
   config: BlockerConfig;
+  onUpdateConfig: (updated: Partial<BlockerConfig>) => void;
   onToggleAppBlock: (appId: string) => void;
   onAddCustomApp: (name: string, packageName: string, category: AppItem['category']) => void;
   onOpenPlayStoreProtection: () => void;
@@ -46,6 +48,7 @@ interface DashboardProps {
 export const Dashboard: React.FC<DashboardProps> = ({
   apps,
   config,
+  onUpdateConfig,
   onToggleAppBlock,
   onAddCustomApp,
   onOpenPlayStoreProtection,
@@ -56,6 +59,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   onSimulateAppLaunch,
   onLockBackToCalculator,
 }) => {
+  const [activeTab, setActiveTab] = useState<'blocker' | 'settings'>('blocker');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [filterMode, setFilterMode] = useState<'all' | 'blocked' | 'system'>('all');
   const [showAddAppModal, setShowAddAppModal] = useState<boolean>(false);
@@ -139,19 +143,54 @@ export const Dashboard: React.FC<DashboardProps> = ({
         </div>
       </div>
 
-      {/* Main Content Area */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        {/* Protection Status Banner (Clickable to open detailed report) */}
-        <div
-          onClick={onOpenStatusModal}
-          className={`p-3.5 rounded-2xl border transition-all cursor-pointer shadow-sm hover:brightness-105 ${
-            protectionLevel === 'fully_protected'
-              ? 'bg-emerald-950/30 border-emerald-500/40 text-emerald-300'
-              : protectionLevel === 'partially_protected'
-              ? 'bg-amber-950/30 border-amber-500/40 text-amber-300'
-              : 'bg-rose-950/30 border-rose-500/40 text-rose-300'
+      {/* Main Tab Switcher: App Blocker vs Settings */}
+      <div className="bg-neutral-900 border-b border-neutral-800 px-4 pt-2 flex gap-4 shrink-0">
+        <button
+          onClick={() => setActiveTab('blocker')}
+          className={`pb-2.5 text-xs font-bold transition-all relative cursor-pointer ${
+            activeTab === 'blocker' ? 'text-emerald-400' : 'text-neutral-400 hover:text-neutral-200'
           }`}
         >
+          <span>App Blocker ({blockedApps.length} Blocked)</span>
+          {activeTab === 'blocker' && (
+            <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-400 rounded-full" />
+          )}
+        </button>
+
+        <button
+          onClick={() => setActiveTab('settings')}
+          className={`pb-2.5 text-xs font-bold transition-all relative cursor-pointer ${
+            activeTab === 'settings' ? 'text-emerald-400' : 'text-neutral-400 hover:text-neutral-200'
+          }`}
+        >
+          <span>Settings (Password & About)</span>
+          {activeTab === 'settings' && (
+            <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-400 rounded-full" />
+          )}
+        </button>
+      </div>
+
+      {/* Main Content Area */}
+      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        {activeTab === 'settings' ? (
+          <SettingsTab
+            config={config}
+            onUpdateConfig={onUpdateConfig}
+            onOpenProjectExporter={onOpenProjectExporter}
+          />
+        ) : (
+          <>
+            {/* Protection Status Banner (Clickable to open detailed report) */}
+            <div
+              onClick={onOpenStatusModal}
+              className={`p-3.5 rounded-2xl border transition-all cursor-pointer shadow-sm hover:brightness-105 ${
+                protectionLevel === 'fully_protected'
+                  ? 'bg-emerald-950/30 border-emerald-500/40 text-emerald-300'
+                  : protectionLevel === 'partially_protected'
+                  ? 'bg-amber-950/30 border-amber-500/40 text-amber-300'
+                  : 'bg-rose-950/30 border-rose-500/40 text-rose-300'
+              }`}
+            >
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <span className={`w-2.5 h-2.5 rounded-full ${
@@ -374,7 +413,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
             )}
           </div>
         </div>
-      </div>
+      </>
+    )}
+  </div>
 
       {/* SYSTEM CRITICAL APP WARNING MODAL (Section 4 requirement) */}
       {systemWarningApp && (

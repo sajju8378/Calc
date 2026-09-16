@@ -36,6 +36,9 @@ export interface BlockerConfig {
   lockoutUntilTimestamp: number | null;
   temporaryUnlocks: Record<string, number>; // packageName -> expiry timestamp
   lastRebootCheckTimestamp: number;
+  securityQuestion?: string;
+  securityAnswerHash?: string;
+  securityAnswerSalt?: string;
 }
 
 export interface SecurityAuditResult {

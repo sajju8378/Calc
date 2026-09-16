@@ -24,7 +24,16 @@ const STORAGE_KEY_CONFIG = 'calc_appblocker_config_v1';
 
 export default function App() {
   const [isFrameMode, setIsFrameMode] = useState<boolean>(true);
-  const [viewMode, setViewMode] = useState<'calculator' | 'onboarding' | 'dashboard'>('calculator');
+  const [viewMode, setViewMode] = useState<'calculator' | 'onboarding' | 'dashboard'>(() => {
+    const saved = localStorage.getItem(STORAGE_KEY_CONFIG);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (parsed.isFirstTimeSetupComplete) return 'calculator';
+      } catch {}
+    }
+    return 'onboarding';
+  });
 
   // Apps state
   const [apps, setApps] = useState<AppItem[]>(() => {
@@ -256,9 +265,11 @@ export default function App() {
         <FirstTimeSetup
           initialApps={apps}
           onComplete={(newConfig, selectedApps) => {
-            setConfig((prev) => ({ ...prev, ...newConfig }));
+            setConfig((prev) => ({ ...prev, ...newConfig, isFirstTimeSetupComplete: true }));
             setApps(selectedApps);
-            setViewMode('dashboard');
+            setRebootNotification('Vault Password Saved! App closing to activate calculator disguise. Type your password and press "=" anytime to unlock.');
+            setTimeout(() => setRebootNotification(null), 5000);
+            setViewMode('calculator');
           }}
           onCancel={() => setViewMode('calculator')}
         />
@@ -268,6 +279,7 @@ export default function App() {
         <Dashboard
           apps={apps}
           config={config}
+          onUpdateConfig={(updated) => setConfig((prev) => ({ ...prev, ...updated }))}
           onToggleAppBlock={handleToggleAppBlock}
           onAddCustomApp={handleAddCustomApp}
           onOpenPlayStoreProtection={() => setShowPlayStoreModal(true)}
