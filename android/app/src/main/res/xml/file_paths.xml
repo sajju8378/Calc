@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <files-path name="vault_photos" path="vault_photos/" />
+    <files-path name="vault_videos" path="vault_videos/" />
+    <files-path name="vault_media" path="." />
+</paths>

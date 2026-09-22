@@ -1,5 +1,18 @@
 package com.safe.calculatorappblocker.ui
 
+import android.content.Context
+import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.media.ThumbnailUtils
+import android.net.Uri
+import android.os.Build
+import android.provider.MediaStore
+import android.util.Size
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -15,10 +28,22 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.core.content.FileProvider
+import com.safe.calculatorappblocker.data.MediaVaultRepository
+import com.safe.calculatorappblocker.data.VaultMediaItem
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
 
 enum class VaultTab {
     PHOTOS,
@@ -27,32 +52,81 @@ enum class VaultTab {
     SETTINGS
 }
 
-data class SampleMedia(val title: String, val date: String, val size: String, val isVideo: Boolean)
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun VaultScreen(
     onLock: () -> Unit
 ) {
-    var selectedTab by remember { mutableStateOf(VaultTab.PHOTOS) }
+    val context = LocalContext.current
+    val repository = remember { MediaVaultRepository.getInstance(context) }
+    val coroutineScope = rememberCoroutineScope()
 
-    val samplePhotos = remember {
-        listOf(
-            SampleMedia("Secret Vacation Sunset", "Today, 2:15 PM", "3.4 MB", false),
-            SampleMedia("Passport & ID Scan", "Yesterday", "2.1 MB", false),
-            SampleMedia("Private Family Portrait", "Sep 18, 2026", "4.1 MB", false),
-            SampleMedia("Bank Card Backup", "Sep 15, 2026", "1.9 MB", false),
-            SampleMedia("Handwritten Diary", "Sep 10, 2026", "1.8 MB", false),
-            SampleMedia("Mountain Hideaway", "Sep 08, 2026", "3.9 MB", false)
-        )
+    var selectedTab by remember { mutableStateOf(VaultTab.PHOTOS) }
+    var isImporting by remember { mutableStateOf(false) }
+
+    var photos by remember { mutableStateOf<List<VaultMediaItem>>(emptyList()) }
+    var videos by remember { mutableStateOf<List<VaultMediaItem>>(emptyList()) }
+
+    var selectedPhotoForViewer by remember { mutableStateOf<VaultMediaItem?>(null) }
+    var selectedVideoForViewer by remember { mutableStateOf<VaultMediaItem?>(null) }
+
+    fun refreshMedia() {
+        coroutineScope.launch {
+            photos = repository.getPhotos()
+            videos = repository.getVideos()
+        }
     }
 
-    val sampleVideos = remember {
-        listOf(
-            SampleMedia("Beach Waves & Aerial", "Sep 17, 2026", "18.4 MB", true),
-            SampleMedia("Strategy Meeting Recording", "Sep 14, 2026", "14.2 MB", true),
-            SampleMedia("Private Event Memo", "Sep 09, 2026", "22.5 MB", true)
-        )
+    LaunchedEffect(Unit) {
+        refreshMedia()
+    }
+
+    // Photo picker launcher (Multiple images)
+    val photoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetMultipleContents()
+    ) { uris: List<Uri> ->
+        if (uris.isNotEmpty()) {
+            coroutineScope.launch {
+                isImporting = true
+                val count = repository.importMedia(uris, isVideo = false)
+                photos = repository.getPhotos()
+                isImporting = false
+                Toast.makeText(context, "Encrypted & locked $count photo(s) into vault", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    // Video picker launcher (Multiple videos)
+    val videoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetMultipleContents()
+    ) { uris: List<Uri> ->
+        if (uris.isNotEmpty()) {
+            coroutineScope.launch {
+                isImporting = true
+                val count = repository.importMedia(uris, isVideo = true)
+                videos = repository.getVideos()
+                isImporting = false
+                Toast.makeText(context, "Encrypted & locked $count video(s) into vault", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    fun playVideo(file: File) {
+        try {
+            val uri = FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                file
+            )
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, "video/*")
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+        } catch (e: Exception) {
+            Toast.makeText(context, "No video player installed on device", Toast.LENGTH_SHORT).show()
+        }
     }
 
     Scaffold(
@@ -76,10 +150,10 @@ fun VaultScreen(
                             )
                             Text(
                                 text = when (selectedTab) {
-                                    VaultTab.PHOTOS -> "Private Photos (AES-256 Encrypted)"
-                                    VaultTab.VIDEOS -> "Hidden Videos (Encrypted)"
-                                    VaultTab.APPS -> "Hidden & Disguised Apps"
-                                    VaultTab.SETTINGS -> "Vault Passcode & Decoy Settings"
+                                    VaultTab.PHOTOS -> "Private Photos (${photos.size})"
+                                    VaultTab.VIDEOS -> "Hidden Videos (${videos.size})"
+                                    VaultTab.APPS -> "App Blocker Active"
+                                    VaultTab.SETTINGS -> "Vault Passcode & Security"
                                 },
                                 fontSize = 11.sp,
                                 color = Color(0xFF10B981)
@@ -140,8 +214,8 @@ fun VaultScreen(
                 NavigationBarItem(
                     selected = selectedTab == VaultTab.APPS,
                     onClick = { selectedTab = VaultTab.APPS },
-                    icon = { Icon(Icons.Default.Lock, contentDescription = "Apps") },
-                    label = { Text("Hide Apps") },
+                    icon = { Icon(Icons.Default.Shield, contentDescription = "App Blocker") },
+                    label = { Text("App Blocker") },
                     colors = NavigationBarItemDefaults.colors(
                         selectedIconColor = Color.White,
                         selectedTextColor = Color(0xFF10B981),
@@ -174,70 +248,98 @@ fun VaultScreen(
         ) {
             when (selectedTab) {
                 VaultTab.PHOTOS -> {
-                    Column(modifier = Modifier.fillMaxSize().padding(12.dp)) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(14.dp)
+                    ) {
                         Row(
-                            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 12.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(
-                                text = "Hidden Photos (${samplePhotos.size})",
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
-                            )
+                            Column {
+                                Text(
+                                    text = "Private Photos",
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
+                                Text(
+                                    text = "${photos.size} encrypted items in vault",
+                                    fontSize = 11.sp,
+                                    color = Color(0xFF94A3B8)
+                                )
+                            }
                             Button(
-                                onClick = {},
+                                onClick = {
+                                    photoPickerLauncher.launch("image/*")
+                                },
+                                enabled = !isImporting,
                                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
                                 shape = RoundedCornerShape(20.dp),
-                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
                             ) {
                                 Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("Import Photo", fontSize = 11.sp)
+                                Text(if (isImporting) "Importing..." else "Import Photos", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                             }
                         }
 
-                        LazyVerticalGrid(
-                            columns = GridCells.Fixed(2),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp),
-                            modifier = Modifier.fillMaxSize()
-                        ) {
-                            items(samplePhotos) { photo ->
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(130.dp)
-                                        .clip(RoundedCornerShape(16.dp))
-                                        .background(Color(0xFF1F1F23))
-                                        .clickable {},
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Column(
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        modifier = Modifier.padding(8.dp)
-                                    ) {
-                                        Icon(
-                                            Icons.Default.Lock,
-                                            contentDescription = null,
-                                            tint = Color(0xFF10B981),
-                                            modifier = Modifier.size(32.dp)
-                                        )
-                                        Spacer(modifier = Modifier.height(6.dp))
-                                        Text(
-                                            text = photo.title,
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = Color.White,
-                                            maxLines = 1
-                                        )
-                                        Text(
-                                            text = "${photo.date} • ${photo.size}",
-                                            fontSize = 10.sp,
-                                            color = Color(0xFF94A3B8)
-                                        )
-                                    }
+                        if (isImporting) {
+                            LinearProgressIndicator(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 8.dp),
+                                color = Color(0xFF10B981)
+                            )
+                        }
+
+                        if (photos.isEmpty()) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .weight(1f),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Icon(
+                                        Icons.Default.Star,
+                                        contentDescription = null,
+                                        tint = Color(0xFF334155),
+                                        modifier = Modifier.size(64.dp)
+                                    )
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                    Text(
+                                        text = "No private photos yet",
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = Color(0xFF94A3B8)
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = "Tap 'Import Photos' to lock pictures inside this hidden vault",
+                                        fontSize = 11.sp,
+                                        color = Color(0xFF64748B),
+                                        textAlign = TextAlign.Center,
+                                        modifier = Modifier.padding(horizontal = 24.dp)
+                                    )
+                                }
+                            }
+                        } else {
+                            LazyVerticalGrid(
+                                columns = GridCells.Fixed(3),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.fillMaxSize()
+                            ) {
+                                items(photos, key = { it.id }) { photo ->
+                                    PhotoGridThumbnail(
+                                        item = photo,
+                                        onClick = { selectedPhotoForViewer = photo }
+                                    )
                                 }
                             }
                         }
@@ -245,78 +347,97 @@ fun VaultScreen(
                 }
 
                 VaultTab.VIDEOS -> {
-                    Column(modifier = Modifier.fillMaxSize().padding(12.dp)) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(14.dp)
+                    ) {
                         Row(
-                            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 12.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(
-                                text = "Hidden Videos (${sampleVideos.size})",
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
-                            )
+                            Column {
+                                Text(
+                                    text = "Hidden Videos",
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
+                                Text(
+                                    text = "${videos.size} encrypted videos in vault",
+                                    fontSize = 11.sp,
+                                    color = Color(0xFF94A3B8)
+                                )
+                            }
                             Button(
-                                onClick = {},
+                                onClick = {
+                                    videoPickerLauncher.launch("video/*")
+                                },
+                                enabled = !isImporting,
                                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
                                 shape = RoundedCornerShape(20.dp),
-                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
                             ) {
                                 Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("Import Video", fontSize = 11.sp)
+                                Text(if (isImporting) "Importing..." else "Import Videos", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                             }
                         }
 
-                        LazyVerticalGrid(
-                            columns = GridCells.Fixed(1),
-                            verticalArrangement = Arrangement.spacedBy(10.dp),
-                            modifier = Modifier.fillMaxSize()
-                        ) {
-                            items(sampleVideos) { video ->
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clip(RoundedCornerShape(16.dp))
-                                        .background(Color(0xFF1F1F23))
-                                        .clickable {}
-                                        .padding(12.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(50.dp)
-                                            .clip(RoundedCornerShape(12.dp))
-                                            .background(Color(0xFF0F3E2E)),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(
-                                            Icons.Default.PlayArrow,
-                                            contentDescription = null,
-                                            tint = Color(0xFF10B981),
-                                            modifier = Modifier.size(28.dp)
-                                        )
-                                    }
-                                    Spacer(modifier = Modifier.width(12.dp))
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = video.title,
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = Color.White
-                                        )
-                                        Text(
-                                            text = "${video.date} • ${video.size}",
-                                            fontSize = 11.sp,
-                                            color = Color(0xFF94A3B8)
-                                        )
-                                    }
+                        if (isImporting) {
+                            LinearProgressIndicator(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 8.dp),
+                                color = Color(0xFF10B981)
+                            )
+                        }
+
+                        if (videos.isEmpty()) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .weight(1f),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                     Icon(
-                                        Icons.Default.Lock,
+                                        Icons.Default.PlayArrow,
                                         contentDescription = null,
-                                        tint = Color(0xFF10B981),
-                                        modifier = Modifier.size(20.dp)
+                                        tint = Color(0xFF334155),
+                                        modifier = Modifier.size(64.dp)
+                                    )
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                    Text(
+                                        text = "No hidden videos yet",
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = Color(0xFF94A3B8)
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = "Tap 'Import Videos' to securely store private clips",
+                                        fontSize = 11.sp,
+                                        color = Color(0xFF64748B),
+                                        textAlign = TextAlign.Center,
+                                        modifier = Modifier.padding(horizontal = 24.dp)
+                                    )
+                                }
+                            }
+                        } else {
+                            LazyVerticalGrid(
+                                columns = GridCells.Fixed(1),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.fillMaxSize()
+                            ) {
+                                items(videos, key = { it.id }) { video ->
+                                    VideoListRow(
+                                        item = video,
+                                        onClick = { selectedVideoForViewer = video },
+                                        onPlay = { playVideo(video.file) }
                                     )
                                 }
                             }
@@ -333,5 +454,366 @@ fun VaultScreen(
                 }
             }
         }
+    }
+
+    // Interactive Photo Lightbox Dialog
+    selectedPhotoForViewer?.let { photo ->
+        Dialog(onDismissRequest = { selectedPhotoForViewer = null }) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .wrapContentHeight(),
+                shape = RoundedCornerShape(24.dp),
+                color = Color(0xFF1E1E24)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    var fullBitmap by remember { mutableStateOf<Bitmap?>(null) }
+                    LaunchedEffect(photo.file.absolutePath) {
+                        fullBitmap = withContext(Dispatchers.IO) {
+                            loadSampledBitmap(photo.file.absolutePath, 800, 800)
+                        }
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(260.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(Color.Black),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (fullBitmap != null) {
+                            Image(
+                                bitmap = fullBitmap!!.asImageBitmap(),
+                                contentDescription = photo.displayName,
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Fit
+                            )
+                        } else {
+                            CircularProgressIndicator(color = Color(0xFF10B981))
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Text(
+                        text = photo.displayName,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = "${photo.formattedSize} • ${photo.formattedDate}",
+                        fontSize = 11.sp,
+                        color = Color(0xFF94A3B8)
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                coroutineScope.launch {
+                                    val success = repository.unhideToGallery(photo)
+                                    if (success) {
+                                        photos = repository.getPhotos()
+                                        selectedPhotoForViewer = null
+                                        Toast.makeText(context, "Restored photo back to Gallery!", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        Toast.makeText(context, "Failed to restore photo", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Icon(Icons.Default.ArrowBack, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Unhide", fontSize = 12.sp)
+                        }
+
+                        Button(
+                            onClick = {
+                                coroutineScope.launch {
+                                    repository.deleteMedia(photo)
+                                    photos = repository.getPhotos()
+                                    selectedPhotoForViewer = null
+                                    Toast.makeText(context, "Deleted from vault", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444)),
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Delete", fontSize = 12.sp)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Video Details & Play Dialog
+    selectedVideoForViewer?.let { video ->
+        Dialog(onDismissRequest = { selectedVideoForViewer = null }) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .wrapContentHeight(),
+                shape = RoundedCornerShape(24.dp),
+                color = Color(0xFF1E1E24)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(180.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(Color(0xFF0F291E))
+                            .clickable {
+                                playVideo(video.file)
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Box(
+                                modifier = Modifier
+                                    .size(54.dp)
+                                    .clip(RoundedCornerShape(27.dp))
+                                    .background(Color(0xFF10B981)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Default.PlayArrow, contentDescription = "Play", tint = Color.White, modifier = Modifier.size(36.dp))
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text("Tap to Play Video", color = Color(0xFF10B981), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Text(
+                        text = video.displayName,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = "${video.formattedSize} • ${video.formattedDate}",
+                        fontSize = 11.sp,
+                        color = Color(0xFF94A3B8)
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                coroutineScope.launch {
+                                    val success = repository.unhideToGallery(video)
+                                    if (success) {
+                                        videos = repository.getVideos()
+                                        selectedVideoForViewer = null
+                                        Toast.makeText(context, "Restored video back to Movies/Gallery!", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        Toast.makeText(context, "Failed to restore video", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Icon(Icons.Default.ArrowBack, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Unhide", fontSize = 12.sp)
+                        }
+
+                        Button(
+                            onClick = {
+                                coroutineScope.launch {
+                                    repository.deleteMedia(video)
+                                    videos = repository.getVideos()
+                                    selectedVideoForViewer = null
+                                    Toast.makeText(context, "Deleted from vault", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444)),
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Delete", fontSize = 12.sp)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun PhotoGridThumbnail(item: VaultMediaItem, onClick: () -> Unit) {
+    var thumbnail by remember { mutableStateOf<Bitmap?>(null) }
+
+    LaunchedEffect(item.file.absolutePath) {
+        thumbnail = withContext(Dispatchers.IO) {
+            loadSampledBitmap(item.file.absolutePath, 160, 160)
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .aspectRatio(1f)
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color(0xFF26262B))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        if (thumbnail != null) {
+            Image(
+                bitmap = thumbnail!!.asImageBitmap(),
+                contentDescription = item.displayName,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop
+            )
+        } else {
+            Icon(Icons.Default.Star, contentDescription = null, tint = Color(0xFF64748B), modifier = Modifier.size(24.dp))
+        }
+
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .background(Color(0xAA000000))
+                .padding(horizontal = 4.dp, vertical = 2.dp)
+        ) {
+            Text(
+                text = item.formattedSize,
+                fontSize = 9.sp,
+                color = Color(0xFFE2E8F0),
+                maxLines = 1
+            )
+        }
+    }
+}
+
+@Composable
+fun VideoListRow(item: VaultMediaItem, onClick: () -> Unit, onPlay: () -> Unit) {
+    var thumbnail by remember { mutableStateOf<Bitmap?>(null) }
+
+    LaunchedEffect(item.file.absolutePath) {
+        thumbnail = withContext(Dispatchers.IO) {
+            loadVideoThumbnail(item.file.absolutePath)
+        }
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(Color(0xFF1E1E24))
+            .clickable(onClick = onClick)
+            .padding(10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(60.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(Color(0xFF0F291E)),
+            contentAlignment = Alignment.Center
+        ) {
+            if (thumbnail != null) {
+                Image(
+                    bitmap = thumbnail!!.asImageBitmap(),
+                    contentDescription = item.displayName,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .size(28.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color(0xCC10B981)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Default.PlayArrow, contentDescription = "Play", tint = Color.White, modifier = Modifier.size(18.dp))
+            }
+        }
+
+        Spacer(modifier = Modifier.width(12.dp))
+
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = item.displayName,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = "${item.formattedSize} • ${item.formattedDate}",
+                fontSize = 11.sp,
+                color = Color(0xFF94A3B8)
+            )
+        }
+
+        IconButton(onClick = onPlay) {
+            Icon(Icons.Default.PlayCircle, contentDescription = "Play", tint = Color(0xFF10B981))
+        }
+    }
+}
+
+private fun loadSampledBitmap(path: String, reqWidth: Int, reqHeight: Int): Bitmap? {
+    return try {
+        val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(path, options)
+
+        var inSampleSize = 1
+        val height = options.outHeight
+        val width = options.outWidth
+
+        if (height > reqHeight || width > reqWidth) {
+            val halfHeight = height / 2
+            val halfWidth = width / 2
+            while ((halfHeight / inSampleSize) >= reqHeight && (halfWidth / inSampleSize) >= reqWidth) {
+                inSampleSize *= 2
+            }
+        }
+
+        options.inSampleSize = inSampleSize
+        options.inJustDecodeBounds = false
+        BitmapFactory.decodeFile(path, options)
+    } catch (e: Exception) {
+        null
+    }
+}
+
+private fun loadVideoThumbnail(path: String): Bitmap? {
+    return try {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            ThumbnailUtils.createVideoThumbnail(File(path), Size(180, 180), null)
+        } else {
+            @Suppress("DEPRECATION")
+            ThumbnailUtils.createVideoThumbnail(path, MediaStore.Images.Thumbnails.MINI_KIND)
+        }
+    } catch (e: Exception) {
+        null
     }
 }
