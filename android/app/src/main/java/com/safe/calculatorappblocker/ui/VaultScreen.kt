@@ -1,5 +1,6 @@
 package com.safe.calculatorappblocker.ui
 
+import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
@@ -11,6 +12,7 @@ import android.provider.MediaStore
 import android.util.Size
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -38,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.core.content.FileProvider
+import com.safe.calculatorappblocker.data.ImportResult
 import com.safe.calculatorappblocker.data.MediaVaultRepository
 import com.safe.calculatorappblocker.data.VaultMediaItem
 import kotlinx.coroutines.Dispatchers
@@ -63,22 +66,65 @@ fun VaultScreen(
 
     var selectedTab by remember { mutableStateOf(VaultTab.PHOTOS) }
     var isImporting by remember { mutableStateOf(false) }
+    var hasAllFilesAccess by remember { mutableStateOf(repository.hasAllFilesAccess()) }
 
     var photos by remember { mutableStateOf<List<VaultMediaItem>>(emptyList()) }
     var videos by remember { mutableStateOf<List<VaultMediaItem>>(emptyList()) }
 
     var selectedPhotoForViewer by remember { mutableStateOf<VaultMediaItem?>(null) }
     var selectedVideoForViewer by remember { mutableStateOf<VaultMediaItem?>(null) }
+    var pendingDeleteDialog by remember { mutableStateOf<ImportResult?>(null) }
 
     fun refreshMedia() {
         coroutineScope.launch {
             photos = repository.getPhotos()
             videos = repository.getVideos()
+            hasAllFilesAccess = repository.hasAllFilesAccess()
         }
     }
 
     LaunchedEffect(Unit) {
         refreshMedia()
+    }
+
+    // Android 11+ System Delete Request Launcher (Shows Samsung system delete confirmation)
+    val deleteRequestLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            Toast.makeText(context, "Originals removed from Gallery! Only vault copies remain.", Toast.LENGTH_LONG).show()
+        } else {
+            Toast.makeText(context, "Originals kept in Gallery. Grant All Files Access to delete automatically.", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    fun handlePostImportDeletion(result: ImportResult) {
+        coroutineScope.launch {
+            if (repository.hasAllFilesAccess() && result.realPaths.isNotEmpty()) {
+                val deleted = repository.deleteOriginalFilesDirectly(result.realPaths)
+                if (deleted > 0) {
+                    Toast.makeText(
+                        context,
+                        "Locked $deleted item(s) in vault & deleted originals from Gallery!",
+                        Toast.LENGTH_LONG
+                    ).show()
+                    return@launch
+                }
+            }
+
+            val deleteIntent = repository.createMediaStoreDeleteRequest(result.mediaStoreUris)
+            if (deleteIntent != null) {
+                try {
+                    deleteRequestLauncher.launch(
+                        IntentSenderRequest.Builder(deleteIntent.intentSender).build()
+                    )
+                } catch (e: Exception) {
+                    pendingDeleteDialog = result
+                }
+            } else {
+                pendingDeleteDialog = result
+            }
+        }
     }
 
     // Photo picker launcher (Multiple images)
@@ -88,10 +134,13 @@ fun VaultScreen(
         if (uris.isNotEmpty()) {
             coroutineScope.launch {
                 isImporting = true
-                val count = repository.importMedia(uris, isVideo = false)
+                val result = repository.importMedia(uris, isVideo = false)
                 photos = repository.getPhotos()
                 isImporting = false
-                Toast.makeText(context, "Encrypted & locked $count photo(s) into vault", Toast.LENGTH_SHORT).show()
+
+                if (result.count > 0) {
+                    handlePostImportDeletion(result)
+                }
             }
         }
     }
@@ -103,10 +152,13 @@ fun VaultScreen(
         if (uris.isNotEmpty()) {
             coroutineScope.launch {
                 isImporting = true
-                val count = repository.importMedia(uris, isVideo = true)
+                val result = repository.importMedia(uris, isVideo = true)
                 videos = repository.getVideos()
                 isImporting = false
-                Toast.makeText(context, "Encrypted & locked $count video(s) into vault", Toast.LENGTH_SHORT).show()
+
+                if (result.count > 0) {
+                    handlePostImportDeletion(result)
+                }
             }
         }
     }
@@ -253,6 +305,54 @@ fun VaultScreen(
                             .fillMaxSize()
                             .padding(14.dp)
                     ) {
+                        // Permission Banner: Auto-Delete from Gallery
+                        if (!hasAllFilesAccess) {
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 12.dp)
+                                    .clickable {
+                                        context.startActivity(repository.getAllFilesAccessIntent())
+                                    },
+                                shape = RoundedCornerShape(12.dp),
+                                color = Color(0xFF1E293B),
+                                border = ButtonDefaults.outlinedButtonBorder
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        Icons.Default.Info,
+                                        contentDescription = null,
+                                        tint = Color(0xFF38BDF8),
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "Auto-Delete from Gallery",
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color.White
+                                        )
+                                        Text(
+                                            text = "Tap to grant All Files Access so imported media is deleted from Gallery & My Files.",
+                                            fontSize = 10.sp,
+                                            color = Color(0xFF94A3B8)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "Enable",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF38BDF8)
+                                    )
+                                }
+                            }
+                        }
+
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -352,6 +452,54 @@ fun VaultScreen(
                             .fillMaxSize()
                             .padding(14.dp)
                     ) {
+                        // Permission Banner: Auto-Delete from Gallery
+                        if (!hasAllFilesAccess) {
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 12.dp)
+                                    .clickable {
+                                        context.startActivity(repository.getAllFilesAccessIntent())
+                                    },
+                                shape = RoundedCornerShape(12.dp),
+                                color = Color(0xFF1E293B),
+                                border = ButtonDefaults.outlinedButtonBorder
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        Icons.Default.Info,
+                                        contentDescription = null,
+                                        tint = Color(0xFF38BDF8),
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "Auto-Delete from Gallery",
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color.White
+                                        )
+                                        Text(
+                                            text = "Tap to grant All Files Access so imported media is deleted from Gallery & My Files.",
+                                            fontSize = 10.sp,
+                                            color = Color(0xFF94A3B8)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "Enable",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF38BDF8)
+                                    )
+                                }
+                            }
+                        }
+
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -454,6 +602,48 @@ fun VaultScreen(
                 }
             }
         }
+    }
+
+    // Confirmation / Guide Dialog when originals cannot be deleted automatically without All Files Access
+    pendingDeleteDialog?.let { result ->
+        AlertDialog(
+            onDismissRequest = { pendingDeleteDialog = null },
+            title = {
+                Text(
+                    text = "Hide from Gallery & Files?",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp
+                )
+            },
+            text = {
+                Text(
+                    text = "Your media (${result.count} item(s)) is now safely encrypted in Calculator Vault!\n\nTo make them completely invisible to other people, allow 'All files access' so Calculator Vault can remove the unencrypted original files from your Samsung Gallery & My Files.",
+                    color = Color(0xFFCBD5E1),
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        pendingDeleteDialog = null
+                        context.startActivity(repository.getAllFilesAccessIntent())
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981))
+                ) {
+                    Text("Grant Permission", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { pendingDeleteDialog = null }
+                ) {
+                    Text("Keep in Gallery", color = Color(0xFF94A3B8))
+                }
+            },
+            containerColor = Color(0xFF1E1E24)
+        )
     }
 
     // Interactive Photo Lightbox Dialog
