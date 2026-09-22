@@ -192,21 +192,28 @@ fun VaultScreen(
         }
     }
 
-    fun playVideo(file: File) {
-        try {
-            val uri = FileProvider.getUriForFile(
-                context,
-                "${context.packageName}.fileprovider",
-                file
-            )
-            val intent = Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(uri, "video/*")
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    fun playVideo(video: VaultMediaItem) {
+        coroutineScope.launch {
+            val decryptedTemp = repository.getDecryptedVideoForPlayback(video)
+            if (decryptedTemp != null) {
+                try {
+                    val uri = FileProvider.getUriForFile(
+                        context,
+                        "${context.packageName}.fileprovider",
+                        decryptedTemp
+                    )
+                    val intent = Intent(Intent.ACTION_VIEW).apply {
+                        setDataAndType(uri, "video/*")
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    context.startActivity(intent)
+                } catch (e: Exception) {
+                    Toast.makeText(context, "No video player installed on device", Toast.LENGTH_SHORT).show()
+                }
+            } else {
+                Toast.makeText(context, "Failed to decrypt video for playback", Toast.LENGTH_SHORT).show()
             }
-            context.startActivity(intent)
-        } catch (e: Exception) {
-            Toast.makeText(context, "No video player installed on device", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -243,6 +250,41 @@ fun VaultScreen(
                     }
                 },
                 actions = {
+                    if ((selectedTab == VaultTab.PHOTOS && photos.isNotEmpty()) || (selectedTab == VaultTab.VIDEOS && videos.isNotEmpty())) {
+                        IconButton(
+                            onClick = {
+                                coroutineScope.launch {
+                                    val currentList = if (selectedTab == VaultTab.PHOTOS) photos else videos
+                                    val urisToPurge = mutableListOf<Uri>()
+                                    for (item in currentList) {
+                                        val msUri = repository.findMediaStoreUriForVaultItem(item)
+                                        if (msUri != null) {
+                                            urisToPurge.add(msUri)
+                                        }
+                                    }
+                                    if (urisToPurge.isNotEmpty()) {
+                                        val deleteIntent = repository.createMediaStoreDeleteRequest(urisToPurge)
+                                        if (deleteIntent != null) {
+                                            deleteRequestLauncher.launch(
+                                                IntentSenderRequest.Builder(deleteIntent.intentSender).build()
+                                            )
+                                        } else {
+                                            Toast.makeText(context, "Found ${urisToPurge.size} gallery item(s). Please grant All Files Access to delete.", Toast.LENGTH_LONG).show()
+                                        }
+                                    } else {
+                                        Toast.makeText(context, "No leftover originals found in Gallery! Everything is clean.", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            }
+                        ) {
+                            Icon(
+                                Icons.Default.DeleteSweep,
+                                contentDescription = "Purge Gallery Originals",
+                                tint = Color(0xFFD97706)
+                            )
+                        }
+                    }
+
                     FilledTonalButton(
                         onClick = onLock,
                         colors = ButtonDefaults.filledTonalButtonColors(
@@ -419,6 +461,7 @@ fun VaultScreen(
                                 items(photos, key = { it.id }) { photo ->
                                     PhotoGridThumbnail(
                                         item = photo,
+                                        repository = repository,
                                         onClick = { selectedPhotoForViewer = photo }
                                     )
                                 }
@@ -517,8 +560,9 @@ fun VaultScreen(
                                 items(videos, key = { it.id }) { video ->
                                     VideoListRow(
                                         item = video,
+                                        repository = repository,
                                         onClick = { selectedVideoForViewer = video },
-                                        onPlay = { playVideo(video.file) }
+                                        onPlay = { playVideo(video) }
                                     )
                                 }
                             }
@@ -612,7 +656,7 @@ fun VaultScreen(
 
                     LaunchedEffect(photo.file.absolutePath) {
                         fullBitmap = withContext(Dispatchers.IO) {
-                            loadSampledBitmap(photo.file.absolutePath, 800, 800)
+                            repository.loadDecryptedBitmap(photo.file, 800, 800)
                         }
                         originalExistsInGallery = repository.originalFileExistsInGallery(photo)
                     }
@@ -757,7 +801,7 @@ fun VaultScreen(
                             .clip(RoundedCornerShape(16.dp))
                             .background(Color(0xFF0F291E))
                             .clickable {
-                                playVideo(video.file)
+                                playVideo(video)
                             },
                         contentAlignment = Alignment.Center
                     ) {
@@ -874,12 +918,16 @@ fun VaultScreen(
 }
 
 @Composable
-fun PhotoGridThumbnail(item: VaultMediaItem, onClick: () -> Unit) {
+fun PhotoGridThumbnail(
+    item: VaultMediaItem,
+    repository: MediaVaultRepository,
+    onClick: () -> Unit
+) {
     var thumbnail by remember { mutableStateOf<Bitmap?>(null) }
 
     LaunchedEffect(item.file.absolutePath) {
         thumbnail = withContext(Dispatchers.IO) {
-            loadSampledBitmap(item.file.absolutePath, 160, 160)
+            repository.loadDecryptedBitmap(item.file, 160, 160)
         }
     }
 
@@ -920,12 +968,17 @@ fun PhotoGridThumbnail(item: VaultMediaItem, onClick: () -> Unit) {
 }
 
 @Composable
-fun VideoListRow(item: VaultMediaItem, onClick: () -> Unit, onPlay: () -> Unit) {
+fun VideoListRow(
+    item: VaultMediaItem,
+    repository: MediaVaultRepository,
+    onClick: () -> Unit,
+    onPlay: () -> Unit
+) {
     var thumbnail by remember { mutableStateOf<Bitmap?>(null) }
 
     LaunchedEffect(item.file.absolutePath) {
         thumbnail = withContext(Dispatchers.IO) {
-            loadVideoThumbnail(item.file.absolutePath)
+            repository.loadDecryptedVideoThumbnail(item.file)
         }
     }
 
