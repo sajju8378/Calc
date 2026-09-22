@@ -132,10 +132,10 @@ class MediaVaultRepository private constructor(context: Context) {
 
     suspend fun importMedia(uris: List<Uri>, isVideo: Boolean): ImportResult = withContext(Dispatchers.IO) {
         var importedCount = 0
-        var deletedOriginalsCount = 0
+        var deletedDirectlyCount = 0
         val targetDir = if (isVideo) videosDir else photosDir
         val importedItems = mutableListOf<ImportedItemInfo>()
-        val pendingDeleteUris = mutableListOf<Uri>()
+        val mediaStoreUrisToDelete = mutableListOf<Uri>()
 
         val canDeleteDirectly = hasAllFilesAccess()
 
@@ -146,7 +146,7 @@ class MediaVaultRepository private constructor(context: Context) {
                 val safePrefix = System.currentTimeMillis().toString()
                 val targetFile = File(targetDir, "${safePrefix}_$displayName")
 
-                // Step 1: Copy file stream into our private vault folder
+                // 1. Copy file to private sandbox vault
                 appContext.contentResolver.openInputStream(uri)?.use { input ->
                     FileOutputStream(targetFile).use { output ->
                         input.copyTo(output)
@@ -156,9 +156,9 @@ class MediaVaultRepository private constructor(context: Context) {
                 if (targetFile.exists() && targetFile.length() > 0) {
                     importedCount++
 
-                    // Step 2: Resolve original file's real disk path and MediaStore URI
+                    // 2. Resolve original location and MediaStore URI
                     val (resolvedPath, resolvedMsUri) = resolveOriginalMediaLocation(uri, displayName, fileSize, isVideo)
-                    Log.d(TAG, "Imported $displayName -> Resolved: path=$resolvedPath, msUri=$resolvedMsUri")
+                    Log.d(TAG, "Imported $displayName -> path=$resolvedPath, msUri=$resolvedMsUri")
 
                     val itemInfo = ImportedItemInfo(
                         uri = uri,
@@ -169,16 +169,18 @@ class MediaVaultRepository private constructor(context: Context) {
                     )
                     importedItems.add(itemInfo)
 
-                    // Step 3: Delete original file from Gallery & My Files
-                    var originalDeleted = false
-                    if (canDeleteDirectly && !resolvedPath.isNullOrBlank()) {
-                        originalDeleted = deleteOriginalFileDirectly(resolvedPath, resolvedMsUri)
+                    // 3. Always queue the MediaStore URI for deletion
+                    // This is CRITICAL for Samsung Gallery to remove the photo from its grid!
+                    if (resolvedMsUri != null) {
+                        mediaStoreUrisToDelete.add(resolvedMsUri)
                     }
 
-                    if (!originalDeleted && resolvedMsUri != null) {
-                        pendingDeleteUris.add(resolvedMsUri)
-                    } else if (originalDeleted) {
-                        deletedOriginalsCount++
+                    // 4. If direct file deletion is permitted, delete physical file as well
+                    if (canDeleteDirectly && !resolvedPath.isNullOrBlank()) {
+                        val deleted = deletePhysicalFile(resolvedPath)
+                        if (deleted) {
+                            deletedDirectlyCount++
+                        }
                     }
                 }
             } catch (e: Exception) {
@@ -188,15 +190,98 @@ class MediaVaultRepository private constructor(context: Context) {
 
         ImportResult(
             count = importedCount,
-            deletedOriginalsCount = deletedOriginalsCount,
-            pendingDeleteMediaStoreUris = pendingDeleteUris,
+            deletedOriginalsCount = deletedDirectlyCount,
+            pendingDeleteMediaStoreUris = mediaStoreUrisToDelete,
             items = importedItems
         )
     }
 
     /**
-     * Comprehensive resolver that finds both the exact disk path and MediaStore URI
-     * across Samsung One UI, Android 11/12/13/14, and various content providers.
+     * Finds the MediaStore URI for a photo/video currently stored in the vault
+     * so it can be removed from Samsung Gallery even if imported previously.
+     */
+    suspend fun findMediaStoreUriForVaultItem(item: VaultMediaItem): Uri? = withContext(Dispatchers.IO) {
+        val cleanName = item.displayName
+        val collection = if (item.isVideo) {
+            MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+        } else {
+            MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+        }
+        val proj = arrayOf(MediaStore.MediaColumns._ID)
+        val sel = "${MediaStore.MediaColumns.DISPLAY_NAME} = ?"
+        try {
+            appContext.contentResolver.query(collection, proj, sel, arrayOf(cleanName), null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val id = cursor.getLong(0)
+                    return@withContext ContentUris.withAppendedId(collection, id)
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed finding media store uri for ${item.displayName}", e)
+        }
+
+        // Try searching in MediaStore.Files table
+        try {
+            val filesCollection = MediaStore.Files.getContentUri("external")
+            appContext.contentResolver.query(filesCollection, proj, sel, arrayOf(cleanName), null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val id = cursor.getLong(0)
+                    return@withContext ContentUris.withAppendedId(filesCollection, id)
+                }
+            }
+        } catch (e: Exception) {
+            // ignore
+        }
+
+        null
+    }
+
+    /**
+     * Checks if the original unencrypted file is still present in Samsung Gallery / DCIM
+     */
+    suspend fun originalFileExistsInGallery(item: VaultMediaItem): Boolean = withContext(Dispatchers.IO) {
+        val cleanName = item.displayName
+        val searchDirs = listOf(
+            File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM), "Camera"),
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM),
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
+            File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), "Screenshots"),
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES)
+        )
+        for (dir in searchDirs) {
+            val candidate = File(dir, cleanName)
+            if (candidate.exists() && candidate.isFile) {
+                return@withContext true
+            }
+        }
+        // Also check if MediaStore row still exists
+        val msUri = findMediaStoreUriForVaultItem(item)
+        msUri != null
+    }
+
+    /**
+     * Deletes the physical file directly from storage
+     */
+    private fun deletePhysicalFile(path: String): Boolean {
+        return try {
+            val file = File(path)
+            if (file.exists()) {
+                val deleted = file.delete()
+                Log.d(TAG, "Direct physical delete for $path: $deleted")
+                MediaScannerConnection.scanFile(appContext, arrayOf(path), null, null)
+                deleted
+            } else {
+                false
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed deleting physical file $path", e)
+            false
+        }
+    }
+
+    /**
+     * Comprehensive resolver to find disk path and MediaStore URI
      */
     private fun resolveOriginalMediaLocation(
         uri: Uri,
@@ -223,7 +308,7 @@ class MediaVaultRepository private constructor(context: Context) {
             val docId = DocumentsContract.getDocumentId(uri)
             val authority = uri.authority ?: ""
 
-            // External Storage Document Provider (primary:DCIM/Camera/...)
+            // External Storage Provider (primary:DCIM/Camera/...)
             if (authority.contains("externalstorage", ignoreCase = true)) {
                 val split = docId.split(":")
                 if (split.size >= 2) {
@@ -260,7 +345,7 @@ class MediaVaultRepository private constructor(context: Context) {
         }
 
         // 4. Query MediaStore by DisplayName and Size if path or MediaStore URI is still missing
-        if ((foundPath == null || foundMediaStoreUri == null) && displayName.isNotBlank()) {
+        if (displayName.isNotBlank()) {
             try {
                 val collection = if (isVideo) {
                     MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
@@ -322,63 +407,16 @@ class MediaVaultRepository private constructor(context: Context) {
     }
 
     /**
-     * Deletes the original file from the phone disk and immediately purges
-     * the MediaStore cache so Samsung Gallery & My Files remove the photo right away.
-     */
-    fun deleteOriginalFileDirectly(realPath: String, mediaStoreUri: Uri?): Boolean {
-        var deleted = false
-        try {
-            val file = File(realPath)
-            if (file.exists()) {
-                deleted = file.delete()
-                Log.d(TAG, "Direct File.delete() result for $realPath: $deleted")
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "File.delete() failed for $realPath", e)
-        }
-
-        // Delete from MediaStore database
-        if (mediaStoreUri != null) {
-            try {
-                val rows = appContext.contentResolver.delete(mediaStoreUri, null, null)
-                if (rows > 0) deleted = true
-                Log.d(TAG, "ContentResolver.delete() result for $mediaStoreUri: $rows rows")
-            } catch (e: Exception) {
-                // ignore
-            }
-        }
-
-        try {
-            appContext.contentResolver.delete(
-                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                "${MediaStore.MediaColumns.DATA} = ?",
-                arrayOf(realPath)
-            )
-            appContext.contentResolver.delete(
-                MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
-                "${MediaStore.MediaColumns.DATA} = ?",
-                arrayOf(realPath)
-            )
-        } catch (e: Exception) {
-            // ignore
-        }
-
-        // Trigger MediaScanner to instantly refresh Samsung Gallery and My Files
-        MediaScannerConnection.scanFile(appContext, arrayOf(realPath), null) { scannedPath, _ ->
-            Log.d(TAG, "MediaScanner refreshed Samsung gallery: $scannedPath")
-        }
-
-        return deleted
-    }
-
-    /**
      * Creates an Android 11+ system delete request for the MediaStore.
      * Samsung One UI will prompt: "Allow Calculator Vault to delete X photos from your device?"
+     * This is the ONLY 100% reliable way on Samsung One UI to make photos vanish from Samsung Gallery!
      */
     fun createMediaStoreDeleteRequest(mediaStoreUris: List<Uri>): PendingIntent? {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && mediaStoreUris.isNotEmpty()) {
             return try {
-                MediaStore.createDeleteRequest(appContext.contentResolver, mediaStoreUris)
+                // Ensure unique URIs
+                val distinctUris = mediaStoreUris.distinct()
+                MediaStore.createDeleteRequest(appContext.contentResolver, distinctUris)
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to create MediaStore delete request", e)
                 null

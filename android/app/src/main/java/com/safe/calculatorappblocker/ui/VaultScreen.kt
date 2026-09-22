@@ -87,7 +87,7 @@ fun VaultScreen(
         }
     }
 
-    // Automatically refresh storage access status whenever user returns to the app
+    // Refresh permission status whenever user returns from settings or another app
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
@@ -105,37 +105,52 @@ fun VaultScreen(
         refreshMedia()
     }
 
-    // Android 11+ System Delete Request Launcher (Shows Samsung system delete confirmation)
+    // Android 11+ System Delete Request Launcher
+    // This displays Samsung's native system confirmation dialog:
+    // "Allow Calculator Vault to delete this photo from your device?"
     val deleteRequestLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartIntentSenderForResult()
     ) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
-            Toast.makeText(context, "Originals permanently deleted from Gallery! Only vault copy exists.", Toast.LENGTH_LONG).show()
+            Toast.makeText(
+                context,
+                "✓ Original deleted from Samsung Gallery! Only vault copy exists.",
+                Toast.LENGTH_LONG
+            ).show()
+            refreshMedia()
         } else {
-            Toast.makeText(context, "Originals kept in Gallery. Grant 'All files access' to delete silently.", Toast.LENGTH_LONG).show()
+            Toast.makeText(
+                context,
+                "Original kept in Gallery (Deletion cancelled).",
+                Toast.LENGTH_SHORT
+            ).show()
         }
     }
 
     fun handlePostImport(result: ImportResult) {
-        if (result.deletedOriginalsCount > 0) {
-            Toast.makeText(
-                context,
-                "Locked ${result.count} item(s) & deleted originals from Gallery!",
-                Toast.LENGTH_LONG
-            ).show()
-        } else if (result.pendingDeleteMediaStoreUris.isNotEmpty()) {
+        // PRIORITIZE MediaStore system delete request!
+        // On Android 11/12 (Samsung Galaxy M31 / One UI), this is the ONLY method
+        // that triggers Samsung Gallery to update and immediately erase the thumbnail!
+        if (result.pendingDeleteMediaStoreUris.isNotEmpty()) {
             val deleteIntent = repository.createMediaStoreDeleteRequest(result.pendingDeleteMediaStoreUris)
             if (deleteIntent != null) {
                 try {
                     deleteRequestLauncher.launch(
                         IntentSenderRequest.Builder(deleteIntent.intentSender).build()
                     )
+                    return
                 } catch (e: Exception) {
-                    pendingDeleteDialog = result
+                    // Fallback to dialog
                 }
-            } else {
-                pendingDeleteDialog = result
             }
+        }
+
+        if (result.deletedOriginalsCount > 0) {
+            Toast.makeText(
+                context,
+                "Locked ${result.count} item(s) in Vault!",
+                Toast.LENGTH_LONG
+            ).show()
         } else {
             pendingDeleteDialog = result
         }
@@ -216,8 +231,8 @@ fun VaultScreen(
                             )
                             Text(
                                 text = when (selectedTab) {
-                                    VaultTab.PHOTOS -> if (hasAllFilesAccess) "Private Photos (${photos.size}) • Auto-Delete ON" else "Private Photos (${photos.size})"
-                                    VaultTab.VIDEOS -> if (hasAllFilesAccess) "Hidden Videos (${videos.size}) • Auto-Delete ON" else "Hidden Videos (${videos.size})"
+                                    VaultTab.PHOTOS -> "Private Photos (${photos.size})"
+                                    VaultTab.VIDEOS -> "Hidden Videos (${videos.size})"
                                     VaultTab.APPS -> "App Blocker Active"
                                     VaultTab.SETTINGS -> "Vault Passcode & Security"
                                 },
@@ -319,58 +334,6 @@ fun VaultScreen(
                             .fillMaxSize()
                             .padding(14.dp)
                     ) {
-                        // Permission Banner: If All Files Access is missing, show prominent button
-                        if (!hasAllFilesAccess) {
-                            Surface(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(bottom = 12.dp)
-                                    .clickable {
-                                        context.startActivity(repository.getAllFilesAccessIntent(context))
-                                    },
-                                shape = RoundedCornerShape(12.dp),
-                                color = Color(0xFF1E293B),
-                                border = ButtonDefaults.outlinedButtonBorder
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(12.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(
-                                        Icons.Default.Info,
-                                        contentDescription = null,
-                                        tint = Color(0xFF38BDF8),
-                                        modifier = Modifier.size(24.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(10.dp))
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = "Auto-Delete from Gallery",
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = Color.White
-                                        )
-                                        Text(
-                                            text = "Tap to grant All Files Access so imported photos are wiped from Samsung Gallery & My Files.",
-                                            fontSize = 11.sp,
-                                            color = Color(0xFF94A3B8)
-                                        )
-                                    }
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Button(
-                                        onClick = {
-                                            context.startActivity(repository.getAllFilesAccessIntent(context))
-                                        },
-                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF38BDF8)),
-                                        shape = RoundedCornerShape(16.dp),
-                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
-                                    ) {
-                                        Text("Enable", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
-                                    }
-                                }
-                            }
-                        }
-
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -470,58 +433,6 @@ fun VaultScreen(
                             .fillMaxSize()
                             .padding(14.dp)
                     ) {
-                        // Permission Banner: If All Files Access is missing, show prominent button
-                        if (!hasAllFilesAccess) {
-                            Surface(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(bottom = 12.dp)
-                                    .clickable {
-                                        context.startActivity(repository.getAllFilesAccessIntent(context))
-                                    },
-                                shape = RoundedCornerShape(12.dp),
-                                color = Color(0xFF1E293B),
-                                border = ButtonDefaults.outlinedButtonBorder
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(12.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(
-                                        Icons.Default.Info,
-                                        contentDescription = null,
-                                        tint = Color(0xFF38BDF8),
-                                        modifier = Modifier.size(24.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(10.dp))
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = "Auto-Delete from Gallery",
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = Color.White
-                                        )
-                                        Text(
-                                            text = "Tap to grant All Files Access so imported videos are wiped from Samsung Gallery & My Files.",
-                                            fontSize = 11.sp,
-                                            color = Color(0xFF94A3B8)
-                                        )
-                                    }
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Button(
-                                        onClick = {
-                                            context.startActivity(repository.getAllFilesAccessIntent(context))
-                                        },
-                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF38BDF8)),
-                                        shape = RoundedCornerShape(16.dp),
-                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
-                                    ) {
-                                        Text("Enable", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
-                                    }
-                                }
-                            }
-                        }
-
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -626,7 +537,7 @@ fun VaultScreen(
         }
     }
 
-    // Interactive Dialog when system permissions require manual confirmation
+    // Interactive Dialog when delete intent requires manual permission
     pendingDeleteDialog?.let { result ->
         AlertDialog(
             onDismissRequest = { pendingDeleteDialog = null },
@@ -641,13 +552,13 @@ fun VaultScreen(
             text = {
                 Column {
                     Text(
-                        text = "Your media (${result.count} item(s)) is now safely encrypted in Calculator Vault.",
+                        text = "Your media is now safely locked inside Calculator Vault.",
                         color = Color(0xFFCBD5E1),
                         fontSize = 13.sp
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "To hide them from Samsung Gallery and My Files, grant 'All files access' or allow Calculator Vault to delete the original unencrypted files.",
+                        text = "To erase original unencrypted files from Samsung Gallery & My Files, allow Android permission.",
                         color = Color(0xFF94A3B8),
                         fontSize = 12.sp,
                         lineHeight = 16.sp
@@ -658,11 +569,20 @@ fun VaultScreen(
                 Button(
                     onClick = {
                         pendingDeleteDialog = null
-                        context.startActivity(repository.getAllFilesAccessIntent(context))
+                        if (result.pendingDeleteMediaStoreUris.isNotEmpty()) {
+                            val deleteIntent = repository.createMediaStoreDeleteRequest(result.pendingDeleteMediaStoreUris)
+                            if (deleteIntent != null) {
+                                deleteRequestLauncher.launch(
+                                    IntentSenderRequest.Builder(deleteIntent.intentSender).build()
+                                )
+                            }
+                        } else {
+                            context.startActivity(repository.getAllFilesAccessIntent(context))
+                        }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981))
                 ) {
-                    Text("Grant Permission", fontWeight = FontWeight.Bold)
+                    Text("Delete from Gallery", fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
@@ -688,10 +608,13 @@ fun VaultScreen(
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     var fullBitmap by remember { mutableStateOf<Bitmap?>(null) }
+                    var originalExistsInGallery by remember { mutableStateOf(false) }
+
                     LaunchedEffect(photo.file.absolutePath) {
                         fullBitmap = withContext(Dispatchers.IO) {
                             loadSampledBitmap(photo.file.absolutePath, 800, 800)
                         }
+                        originalExistsInGallery = repository.originalFileExistsInGallery(photo)
                     }
 
                     Box(
@@ -730,7 +653,37 @@ fun VaultScreen(
                         color = Color(0xFF94A3B8)
                     )
 
-                    Spacer(modifier = Modifier.height(16.dp))
+                    // If original still exists in Samsung Gallery, provide an explicit button to delete it!
+                    if (originalExistsInGallery) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Button(
+                            onClick = {
+                                coroutineScope.launch {
+                                    val msUri = repository.findMediaStoreUriForVaultItem(photo)
+                                    if (msUri != null) {
+                                        val deleteIntent = repository.createMediaStoreDeleteRequest(listOf(msUri))
+                                        if (deleteIntent != null) {
+                                            selectedPhotoForViewer = null
+                                            deleteRequestLauncher.launch(
+                                                IntentSenderRequest.Builder(deleteIntent.intentSender).build()
+                                            )
+                                        }
+                                    } else {
+                                        Toast.makeText(context, "Could not locate gallery entry", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD97706)),
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Icon(Icons.Default.DeleteSweep, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Remove Original from Samsung Gallery", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -791,6 +744,12 @@ fun VaultScreen(
                 color = Color(0xFF1E1E24)
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
+                    var originalExistsInGallery by remember { mutableStateOf(false) }
+
+                    LaunchedEffect(video.file.absolutePath) {
+                        originalExistsInGallery = repository.originalFileExistsInGallery(video)
+                    }
+
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -833,7 +792,37 @@ fun VaultScreen(
                         color = Color(0xFF94A3B8)
                     )
 
-                    Spacer(modifier = Modifier.height(16.dp))
+                    // If original still exists in Samsung Gallery, provide an explicit button to delete it!
+                    if (originalExistsInGallery) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Button(
+                            onClick = {
+                                coroutineScope.launch {
+                                    val msUri = repository.findMediaStoreUriForVaultItem(video)
+                                    if (msUri != null) {
+                                        val deleteIntent = repository.createMediaStoreDeleteRequest(listOf(msUri))
+                                        if (deleteIntent != null) {
+                                            selectedVideoForViewer = null
+                                            deleteRequestLauncher.launch(
+                                                IntentSenderRequest.Builder(deleteIntent.intentSender).build()
+                                            )
+                                        }
+                                    } else {
+                                        Toast.makeText(context, "Could not locate gallery entry", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD97706)),
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Icon(Icons.Default.DeleteSweep, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Remove Original from Samsung Gallery", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
