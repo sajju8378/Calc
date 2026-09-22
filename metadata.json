@@ -1,6 +1,6 @@
 {
-  "name": "Calculator AppBlocker",
-  "description": "A privacy-first, non-destructive disguised calculator and digital wellbeing app-blocking tool for Android 12 / Samsung Galaxy M31.",
+  "name": "Calculator Vault",
+  "description": "Disguised calculator vault to securely hide private photos, videos, and apps behind a working calculator with PIN protection.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

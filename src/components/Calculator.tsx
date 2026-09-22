@@ -7,19 +7,25 @@ import React, { useState } from 'react';
 import { Delete, History, RotateCcw } from 'lucide-react';
 
 interface CalculatorProps {
-  onSecretCodeEntered: () => void;
+  onSecretCodeEntered: (isDecoy: boolean) => void;
   secretCode: string; // e.g. "2580"
+  decoyCode?: string; // e.g. "1111"
+  onIntruderAttempt?: (code: string) => void;
 }
 
 export const Calculator: React.FC<CalculatorProps> = ({
   onSecretCodeEntered,
   secretCode,
+  decoyCode = '1111',
+  onIntruderAttempt,
 }) => {
   const [displayValue, setDisplayValue] = useState<string>('0');
   const [equation, setEquation] = useState<string>('');
   const [isNewNumber, setIsNewNumber] = useState<boolean>(true);
   const [history, setHistory] = useState<string[]>([]);
   const [showHistory, setShowHistory] = useState<boolean>(false);
+  const [wrongPinCount, setWrongPinCount] = useState<number>(0);
+  const [showSecretHint, setShowSecretHint] = useState<boolean>(false);
 
   // Normal calculation logic
   const handleDigit = (digit: string) => {
@@ -75,15 +81,31 @@ export const Calculator: React.FC<CalculatorProps> = ({
   const handleEquals = () => {
     const rawInput = displayValue.trim();
 
-    // 1. Check if the secret AppBlocker trigger was entered!
+    // 1. Check if the secret Master Vault trigger was entered!
     // Example: user enters 2580 and presses =
-    // Or if equation is empty and displayValue is the secret code
     if (rawInput === secretCode) {
-      onSecretCodeEntered();
+      setWrongPinCount(0);
+      onSecretCodeEntered(false); // real master vault
       return;
     }
 
-    // 2. Normal mathematical evaluation
+    // 2. Check if the Decoy Vault PIN was entered!
+    if (rawInput === decoyCode) {
+      setWrongPinCount(0);
+      onSecretCodeEntered(true); // decoy empty vault
+      return;
+    }
+
+    // If input was a 4+ digit number without an equation, count as possible intruder PIN attempt
+    if (!equation && rawInput.length >= 4 && !isNaN(Number(rawInput))) {
+      const nextCount = wrongPinCount + 1;
+      setWrongPinCount(nextCount);
+      if (nextCount >= 2 && onIntruderAttempt) {
+        onIntruderAttempt(rawInput);
+      }
+    }
+
+    // 3. Normal mathematical evaluation
     if (!equation) return;
 
     try {
@@ -137,6 +159,14 @@ export const Calculator: React.FC<CalculatorProps> = ({
           title="Calculation History"
         >
           <History className="w-5 h-5" />
+        </button>
+
+        {/* Discreet Vault PIN Demo Hint */}
+        <button
+          onClick={() => setShowSecretHint(!showSecretHint)}
+          className="text-[11px] px-2.5 py-1 rounded-full bg-neutral-800/80 text-neutral-400 hover:text-emerald-400 border border-neutral-700/60 transition-colors cursor-pointer"
+        >
+          {showSecretHint ? `Master: ${secretCode} = | Decoy: ${decoyCode} =` : 'Vault Keypad Hint'}
         </button>
 
         {showHistory && (

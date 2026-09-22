@@ -6,235 +6,123 @@
 import React, { useState, useEffect } from 'react';
 import { PhoneChassis } from './components/PhoneChassis';
 import { Calculator } from './components/Calculator';
-import { FirstTimeSetup } from './components/FirstTimeSetup';
-import { Dashboard } from './components/Dashboard';
-import { BlockedAppOverlay } from './components/BlockedAppOverlay';
-import { PlayStoreProtectionModal } from './components/PlayStoreProtectionModal';
-import { UnknownSourcesModal } from './components/UnknownSourcesModal';
-import { SecurityStatusModal } from './components/SecurityStatusModal';
-import { AntiBypassSecurityModal } from './components/AntiBypassSecurityModal';
+import { VaultDashboard } from './components/VaultDashboard';
+import { VaultSetupWizard } from './components/VaultSetupWizard';
 import { AndroidProjectExporter } from './components/AndroidProjectExporter';
-import { AppItem, BlockerConfig } from './types';
-import { INITIAL_APPS } from './data/defaultApps';
-import { DEFAULT_SALT, hashPinWithSalt } from './utils/security';
-import { ShieldCheck, RotateCw } from 'lucide-react';
+import { VaultConfig, IntruderLog } from './types';
+import { Lock, RotateCw, Sparkles, Shield, Download } from 'lucide-react';
 
-const STORAGE_KEY_APPS = 'calc_appblocker_apps_v1';
-const STORAGE_KEY_CONFIG = 'calc_appblocker_config_v1';
+const STORAGE_KEY_VAULT_CONFIG = 'calc_vault_config_v2';
+const STORAGE_KEY_INTRUDERS = 'calc_vault_intruders_v2';
+
+const DEFAULT_CONFIG: VaultConfig = {
+  secretCalculatorCode: '2580', // Master PIN (enter 2580 and press = )
+  decoyCalculatorCode: '1111',  // Decoy PIN (enter 1111 and press = )
+  disguiseIcon: 'calculator',
+  appNameDisguise: 'Calculator',
+  flipToLockEnabled: true,
+  intruderSelfieEnabled: true,
+  isFirstTimeSetupComplete: true,
+  securityQuestion: 'What was the name of your first school?',
+  securityAnswer: 'Lincoln High',
+  failedPinAttempts: 0,
+  cloudSyncSimulated: false,
+};
 
 export default function App() {
   const [isFrameMode, setIsFrameMode] = useState<boolean>(true);
-  const [viewMode, setViewMode] = useState<'calculator' | 'onboarding' | 'dashboard'>(() => {
-    const saved = localStorage.getItem(STORAGE_KEY_CONFIG);
+  const [viewMode, setViewMode] = useState<'calculator' | 'vault' | 'setup'>('calculator');
+  const [isDecoyMode, setIsDecoyMode] = useState<boolean>(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [showExporter, setShowExporter] = useState<boolean>(false);
+
+  // Vault configuration
+  const [config, setConfig] = useState<VaultConfig>(() => {
+    const saved = localStorage.getItem(STORAGE_KEY_VAULT_CONFIG);
     if (saved) {
       try {
-        const parsed = JSON.parse(saved);
-        if (parsed.isFirstTimeSetupComplete) return 'calculator';
+        return { ...DEFAULT_CONFIG, ...JSON.parse(saved) };
       } catch {}
     }
-    return 'onboarding';
+    return DEFAULT_CONFIG;
   });
 
-  // Apps state
-  const [apps, setApps] = useState<AppItem[]>(() => {
-    const saved = localStorage.getItem(STORAGE_KEY_APPS);
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch {
-        return INITIAL_APPS;
-      }
-    }
-    return INITIAL_APPS;
-  });
-
-  // Blocker configuration state
-  const [config, setConfig] = useState<BlockerConfig>(() => {
-    const saved = localStorage.getItem(STORAGE_KEY_CONFIG);
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch {
-        // fallback
-      }
-    }
-    return {
-      adminPinHash: '',
-      adminPinSalt: DEFAULT_SALT,
-      secretCalculatorCode: '2580', // Default code 2580
-      recoveryCode: 'M31S-77K9-B482-SAFE',
-      isFirstTimeSetupComplete: false,
-      protectionMode: 'standard',
-      deviceAdminEnabled: true,
-      accessibilityServiceEnabled: true,
-      usageStatsEnabled: true,
-      overlayPermissionEnabled: true,
-      unknownSourcesRestricted: true,
-      playStoreProtectionEnabled: true,
-      rebootPersistenceVerified: true,
-      failedPinAttempts: 0,
-      lockoutUntilTimestamp: null,
-      temporaryUnlocks: {},
-      lastRebootCheckTimestamp: Date.now(),
-    };
-  });
-
-  // Modals
-  const [activeBlockedApp, setActiveBlockedApp] = useState<AppItem | null>(null);
-  const [showPlayStoreModal, setShowPlayStoreModal] = useState<boolean>(false);
-  const [showUnknownSourcesModal, setShowUnknownSourcesModal] = useState<boolean>(false);
-  const [showSecurityModal, setShowSecurityModal] = useState<boolean>(false);
-  const [showStatusModal, setShowStatusModal] = useState<boolean>(false);
-  const [showProjectExporter, setShowProjectExporter] = useState<boolean>(false);
-  const [rebootNotification, setRebootNotification] = useState<string | null>(null);
-
-  // Sync state to localStorage
+  // Persist config
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY_APPS, JSON.stringify(apps));
-  }, [apps]);
-
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEY_CONFIG, JSON.stringify(config));
+    localStorage.setItem(STORAGE_KEY_VAULT_CONFIG, JSON.stringify(config));
   }, [config]);
 
-  // Handle secret calculation unlock
-  const handleSecretCodeEntered = () => {
-    if (!config.isFirstTimeSetupComplete) {
-      setViewMode('onboarding');
-    } else {
-      setViewMode('dashboard');
-    }
-  };
+  // Initial welcome toast
+  useEffect(() => {
+    setToastMessage('Calculator Vault active: Enter 2580 and tap "=" to unlock Master Vault, or 1111 for Decoy.');
+    const timer = setTimeout(() => setToastMessage(null), 6000);
+    return () => clearTimeout(timer);
+  }, []);
 
-  // Toggle app blocking state
-  const handleToggleAppBlock = (appId: string) => {
-    setApps((prev) =>
-      prev.map((a) => (a.id === appId ? { ...a, isBlocked: !a.isBlocked, installProtection: !a.isBlocked } : a))
+  // Unlock Trigger
+  const handleSecretCodeEntered = (isDecoy: boolean) => {
+    setIsDecoyMode(isDecoy);
+    setViewMode('vault');
+    setToastMessage(
+      isDecoy
+        ? '⚠️ Decoy Vault Unlocked (Empty simulated vault for duress)'
+        : '✓ Master Vault Unlocked (Photos, Videos & Hidden Apps)'
     );
+    setTimeout(() => setToastMessage(null), 3500);
   };
 
-  // Add custom package
-  const handleAddCustomApp = (name: string, packageName: string, category: AppItem['category']) => {
-    const newApp: AppItem = {
-      id: `app-custom-${Date.now()}`,
-      name,
-      packageName,
-      category,
-      isSystemCritical: false,
-      isBlocked: true,
-      installProtection: true,
-      launchCountBlocked: 0,
-      iconType: 'shield',
+  // Intruder attempt handler
+  const handleIntruderAttempt = (wrongPin: string) => {
+    if (!config.intruderSelfieEnabled) return;
+
+    // Simulate front-camera snap
+    const intruderSnapshots = [
+      'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
+      'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=400&q=80',
+      'https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=400&q=80',
+    ];
+    const randomSnap = intruderSnapshots[Math.floor(Math.random() * intruderSnapshots.length)];
+
+    const now = new Date();
+    const newLog: IntruderLog = {
+      id: `intruder-${Date.now()}`,
+      timestamp: `${now.toLocaleDateString()}, ${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
+      attemptedCode: wrongPin,
+      snapshotUrl: randomSnap,
+      reason: 'Wrong Calculator PIN entered',
     };
-    setApps((prev) => [newApp, ...prev]);
-  };
 
-  // Temporary unlock handling
-  const handleTemporaryUnlock = (packageName: string, minutes: number) => {
-    const expiry = Date.now() + minutes * 60 * 1000;
-    setConfig((prev) => ({
-      ...prev,
-      temporaryUnlocks: { ...prev.temporaryUnlocks, [packageName]: expiry },
-    }));
-    setActiveBlockedApp(null);
-  };
-
-  // Rate-limiting on failed attempts
-  const handleFailedPinAttempt = () => {
-    setConfig((prev) => {
-      const attempts = prev.failedPinAttempts + 1;
-      if (attempts >= 5) {
-        return {
-          ...prev,
-          failedPinAttempts: attempts,
-          lockoutUntilTimestamp: Date.now() + 30 * 1000, // 30s lockout
-        };
-      }
-      return { ...prev, failedPinAttempts: attempts };
-    });
-  };
-
-  const handleSuccessfulPin = () => {
-    setConfig((prev) => ({
-      ...prev,
-      failedPinAttempts: 0,
-      lockoutUntilTimestamp: null,
-    }));
-  };
-
-  // Simulate device reboot (testing Section 13 Reboot Protection)
-  const handleSimulateReboot = () => {
-    setRebootNotification('Restarting Samsung Galaxy M31...');
-    setTimeout(() => {
-      setRebootNotification('ACTION_BOOT_COMPLETED received: Protection rules & DataStore verified intact!');
-      setConfig((prev) => ({
-        ...prev,
-        rebootPersistenceVerified: true,
-        lastRebootCheckTimestamp: Date.now(),
-      }));
-      setTimeout(() => setRebootNotification(null), 4000);
-    }, 1200);
-  };
-
-  // Simulate launching an app
-  const handleSimulateAppLaunch = (app: AppItem) => {
-    const unlockExpiry = config.temporaryUnlocks[app.packageName];
-    const isCurrentlyUnlocked = unlockExpiry && unlockExpiry > Date.now();
-
-    if (app.isBlocked && !isCurrentlyUnlocked) {
-      // Increment blocked count
-      setApps((prev) =>
-        prev.map((a) =>
-          a.id === app.id
-            ? { ...a, launchCountBlocked: a.launchCountBlocked + 1, lastBlockedTime: 'Just now' }
-            : a
-        )
-      );
-      setActiveBlockedApp(app);
-    } else {
-      alert(`Simulated launch: ${app.name} is permitted to open.`);
+    const existingLogsStr = localStorage.getItem(STORAGE_KEY_INTRUDERS);
+    let existingLogs: IntruderLog[] = [];
+    if (existingLogsStr) {
+      try {
+        existingLogs = JSON.parse(existingLogsStr);
+      } catch {}
     }
+    const updatedLogs = [newLog, ...existingLogs];
+    localStorage.setItem(STORAGE_KEY_INTRUDERS, JSON.stringify(updatedLogs));
+
+    setToastMessage('📸 Front camera captured intruder break-in snapshot!');
+    setTimeout(() => setToastMessage(null), 4000);
   };
 
-  // Android navigation controls
+  // Lock back to calculator
+  const handleLock = () => {
+    setViewMode('calculator');
+    setIsDecoyMode(false);
+    setToastMessage('Vault Locked: Disguised as Calculator');
+    setTimeout(() => setToastMessage(null), 2500);
+  };
+
+  // Navigation handlers
   const handleAndroidBack = () => {
-    if (activeBlockedApp) {
-      setActiveBlockedApp(null);
-      return;
-    }
-    if (showPlayStoreModal) {
-      setShowPlayStoreModal(false);
-      return;
-    }
-    if (showUnknownSourcesModal) {
-      setShowUnknownSourcesModal(false);
-      return;
-    }
-    if (showSecurityModal) {
-      setShowSecurityModal(false);
-      return;
-    }
-    if (showStatusModal) {
-      setShowStatusModal(false);
-      return;
-    }
-    if (showProjectExporter) {
-      setShowProjectExporter(false);
-      return;
-    }
-    if (viewMode === 'dashboard' || viewMode === 'onboarding') {
-      setViewMode('calculator');
+    if (viewMode === 'vault' || viewMode === 'setup') {
+      handleLock();
     }
   };
 
   const handleAndroidHome = () => {
-    setActiveBlockedApp(null);
-    setShowPlayStoreModal(false);
-    setShowUnknownSourcesModal(false);
-    setShowSecurityModal(false);
-    setShowStatusModal(false);
-    setShowProjectExporter(false);
-    setViewMode('calculator');
+    handleLock();
   };
 
   return (
@@ -243,112 +131,62 @@ export default function App() {
       onToggleFrameMode={() => setIsFrameMode(!isFrameMode)}
       onAndroidBack={handleAndroidBack}
       onAndroidHome={handleAndroidHome}
-      onAndroidRecents={() => alert('Recent Apps: Calculator AppBlocker active')}
+      onAndroidRecents={() => {
+        if (viewMode === 'vault') {
+          handleLock();
+        }
+      }}
     >
-      {/* Toast Notification Banner */}
-      {rebootNotification && (
-        <div className="absolute top-8 left-4 right-4 z-50 bg-emerald-950/95 border border-emerald-500 text-emerald-200 text-xs p-3 rounded-2xl shadow-xl flex items-center gap-2 animate-in slide-in-from-top duration-200">
-          <RotateCw className="w-4 h-4 text-emerald-400 shrink-0 animate-spin" />
-          <span>{rebootNotification}</span>
+      {/* Toast notifications */}
+      {toastMessage && (
+        <div className="absolute top-10 left-4 right-4 z-50 bg-neutral-900/95 border border-emerald-500/50 text-emerald-200 text-xs px-3.5 py-2.5 rounded-2xl shadow-2xl flex items-center justify-between gap-2 backdrop-blur-md animate-in slide-in-from-top duration-200">
+          <div className="flex items-center gap-2 min-w-0">
+            <Shield className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span className="truncate text-[11px] font-medium">{toastMessage}</span>
+          </div>
+          <button
+            onClick={() => setToastMessage(null)}
+            className="text-neutral-400 hover:text-white text-xs shrink-0 cursor-pointer"
+          >
+            ✕
+          </button>
         </div>
       )}
 
-      {/* Primary View Router */}
+      {/* Primary Views */}
       {viewMode === 'calculator' && (
         <Calculator
-          onSecretCodeEntered={handleSecretCodeEntered}
           secretCode={config.secretCalculatorCode}
+          decoyCode={config.decoyCalculatorCode}
+          onSecretCodeEntered={handleSecretCodeEntered}
+          onIntruderAttempt={handleIntruderAttempt}
         />
       )}
 
-      {viewMode === 'onboarding' && (
-        <FirstTimeSetup
-          initialApps={apps}
-          onComplete={(newConfig, selectedApps) => {
-            setConfig((prev) => ({ ...prev, ...newConfig, isFirstTimeSetupComplete: true }));
-            setApps(selectedApps);
-            setRebootNotification('Vault Password Saved! App closing to activate calculator disguise. Type your password and press "=" anytime to unlock.');
-            setTimeout(() => setRebootNotification(null), 5000);
+      {viewMode === 'vault' && (
+        <VaultDashboard
+          onLock={handleLock}
+          config={config}
+          onUpdateConfig={(updated) => setConfig(updated)}
+          isDecoyMode={isDecoyMode}
+        />
+      )}
+
+      {viewMode === 'setup' && (
+        <VaultSetupWizard
+          onComplete={(newConfig) => {
+            setConfig((prev) => ({ ...prev, ...newConfig }));
             setViewMode('calculator');
+            setToastMessage('Calculator Vault Passcode updated! Type your PIN and tap "=" to unlock.');
+            setTimeout(() => setToastMessage(null), 4000);
           }}
           onCancel={() => setViewMode('calculator')}
         />
       )}
 
-      {viewMode === 'dashboard' && (
-        <Dashboard
-          apps={apps}
-          config={config}
-          onUpdateConfig={(updated) => setConfig((prev) => ({ ...prev, ...updated }))}
-          onToggleAppBlock={handleToggleAppBlock}
-          onAddCustomApp={handleAddCustomApp}
-          onOpenPlayStoreProtection={() => setShowPlayStoreModal(true)}
-          onOpenUnknownSources={() => setShowUnknownSourcesModal(true)}
-          onOpenSecurityModal={() => setShowSecurityModal(true)}
-          onOpenStatusModal={() => setShowStatusModal(true)}
-          onOpenProjectExporter={() => setShowProjectExporter(true)}
-          onSimulateAppLaunch={handleSimulateAppLaunch}
-          onLockBackToCalculator={() => setViewMode('calculator')}
-        />
-      )}
-
-      {/* Sub-Modals and Overlays */}
-      {activeBlockedApp && (
-        <BlockedAppOverlay
-          app={activeBlockedApp}
-          config={config}
-          onReturnHome={() => {
-            setActiveBlockedApp(null);
-            setViewMode('calculator');
-          }}
-          onTemporaryUnlock={handleTemporaryUnlock}
-          onFailedAttempt={handleFailedPinAttempt}
-          onSuccessfulPin={handleSuccessfulPin}
-        />
-      )}
-
-      {showPlayStoreModal && (
-        <PlayStoreProtectionModal
-          config={config}
-          onClose={() => setShowPlayStoreModal(false)}
-          onToggleManagedMode={(enabled) =>
-            setConfig((prev) => ({ ...prev, protectionMode: enabled ? 'managed' : 'standard' }))
-          }
-        />
-      )}
-
-      {showUnknownSourcesModal && (
-        <UnknownSourcesModal
-          config={config}
-          onClose={() => setShowUnknownSourcesModal(false)}
-          onToggleStatus={(restricted) =>
-            setConfig((prev) => ({ ...prev, unknownSourcesRestricted: restricted }))
-          }
-        />
-      )}
-
-      {showSecurityModal && (
-        <AntiBypassSecurityModal
-          config={config}
-          onClose={() => setShowSecurityModal(false)}
-          onUpdateConfig={(updated) => setConfig((prev) => ({ ...prev, ...updated }))}
-          onSimulateReboot={handleSimulateReboot}
-        />
-      )}
-
-      {showStatusModal && (
-        <SecurityStatusModal
-          config={config}
-          blockedAppsCount={apps.filter((a) => a.isBlocked).length}
-          onClose={() => setShowStatusModal(false)}
-          onRunAudit={() =>
-            setConfig((prev) => ({ ...prev, rebootPersistenceVerified: true }))
-          }
-        />
-      )}
-
-      {showProjectExporter && (
-        <AndroidProjectExporter onClose={() => setShowProjectExporter(false)} />
+      {/* Android Project Exporter Modal */}
+      {showExporter && (
+        <AndroidProjectExporter onClose={() => setShowExporter(false)} />
       )}
     </PhoneChassis>
   );
