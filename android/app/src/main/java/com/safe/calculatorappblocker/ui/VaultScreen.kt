@@ -33,6 +33,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -40,6 +41,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.core.content.FileProvider
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import com.safe.calculatorappblocker.data.ImportResult
 import com.safe.calculatorappblocker.data.MediaVaultRepository
 import com.safe.calculatorappblocker.data.VaultMediaItem
@@ -61,6 +64,7 @@ fun VaultScreen(
     onLock: () -> Unit
 ) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     val repository = remember { MediaVaultRepository.getInstance(context) }
     val coroutineScope = rememberCoroutineScope()
 
@@ -83,6 +87,20 @@ fun VaultScreen(
         }
     }
 
+    // Automatically refresh storage access status whenever user returns to the app
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                hasAllFilesAccess = repository.hasAllFilesAccess()
+                refreshMedia()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
     LaunchedEffect(Unit) {
         refreshMedia()
     }
@@ -92,27 +110,21 @@ fun VaultScreen(
         contract = ActivityResultContracts.StartIntentSenderForResult()
     ) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
-            Toast.makeText(context, "Originals removed from Gallery! Only vault copies remain.", Toast.LENGTH_LONG).show()
+            Toast.makeText(context, "Originals permanently deleted from Gallery! Only vault copy exists.", Toast.LENGTH_LONG).show()
         } else {
-            Toast.makeText(context, "Originals kept in Gallery. Grant All Files Access to delete automatically.", Toast.LENGTH_LONG).show()
+            Toast.makeText(context, "Originals kept in Gallery. Grant 'All files access' to delete silently.", Toast.LENGTH_LONG).show()
         }
     }
 
-    fun handlePostImportDeletion(result: ImportResult) {
-        coroutineScope.launch {
-            if (repository.hasAllFilesAccess() && result.realPaths.isNotEmpty()) {
-                val deleted = repository.deleteOriginalFilesDirectly(result.realPaths)
-                if (deleted > 0) {
-                    Toast.makeText(
-                        context,
-                        "Locked $deleted item(s) in vault & deleted originals from Gallery!",
-                        Toast.LENGTH_LONG
-                    ).show()
-                    return@launch
-                }
-            }
-
-            val deleteIntent = repository.createMediaStoreDeleteRequest(result.mediaStoreUris)
+    fun handlePostImport(result: ImportResult) {
+        if (result.deletedOriginalsCount > 0) {
+            Toast.makeText(
+                context,
+                "Locked ${result.count} item(s) & deleted originals from Gallery!",
+                Toast.LENGTH_LONG
+            ).show()
+        } else if (result.pendingDeleteMediaStoreUris.isNotEmpty()) {
+            val deleteIntent = repository.createMediaStoreDeleteRequest(result.pendingDeleteMediaStoreUris)
             if (deleteIntent != null) {
                 try {
                     deleteRequestLauncher.launch(
@@ -124,6 +136,8 @@ fun VaultScreen(
             } else {
                 pendingDeleteDialog = result
             }
+        } else {
+            pendingDeleteDialog = result
         }
     }
 
@@ -139,7 +153,7 @@ fun VaultScreen(
                 isImporting = false
 
                 if (result.count > 0) {
-                    handlePostImportDeletion(result)
+                    handlePostImport(result)
                 }
             }
         }
@@ -157,7 +171,7 @@ fun VaultScreen(
                 isImporting = false
 
                 if (result.count > 0) {
-                    handlePostImportDeletion(result)
+                    handlePostImport(result)
                 }
             }
         }
@@ -202,8 +216,8 @@ fun VaultScreen(
                             )
                             Text(
                                 text = when (selectedTab) {
-                                    VaultTab.PHOTOS -> "Private Photos (${photos.size})"
-                                    VaultTab.VIDEOS -> "Hidden Videos (${videos.size})"
+                                    VaultTab.PHOTOS -> if (hasAllFilesAccess) "Private Photos (${photos.size}) • Auto-Delete ON" else "Private Photos (${photos.size})"
+                                    VaultTab.VIDEOS -> if (hasAllFilesAccess) "Hidden Videos (${videos.size}) • Auto-Delete ON" else "Hidden Videos (${videos.size})"
                                     VaultTab.APPS -> "App Blocker Active"
                                     VaultTab.SETTINGS -> "Vault Passcode & Security"
                                 },
@@ -305,14 +319,14 @@ fun VaultScreen(
                             .fillMaxSize()
                             .padding(14.dp)
                     ) {
-                        // Permission Banner: Auto-Delete from Gallery
+                        // Permission Banner: If All Files Access is missing, show prominent button
                         if (!hasAllFilesAccess) {
                             Surface(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(bottom = 12.dp)
                                     .clickable {
-                                        context.startActivity(repository.getAllFilesAccessIntent())
+                                        context.startActivity(repository.getAllFilesAccessIntent(context))
                                     },
                                 shape = RoundedCornerShape(12.dp),
                                 color = Color(0xFF1E293B),
@@ -326,29 +340,33 @@ fun VaultScreen(
                                         Icons.Default.Info,
                                         contentDescription = null,
                                         tint = Color(0xFF38BDF8),
-                                        modifier = Modifier.size(22.dp)
+                                        modifier = Modifier.size(24.dp)
                                     )
                                     Spacer(modifier = Modifier.width(10.dp))
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(
                                             text = "Auto-Delete from Gallery",
-                                            fontSize = 12.sp,
+                                            fontSize = 13.sp,
                                             fontWeight = FontWeight.Bold,
                                             color = Color.White
                                         )
                                         Text(
-                                            text = "Tap to grant All Files Access so imported media is deleted from Gallery & My Files.",
-                                            fontSize = 10.sp,
+                                            text = "Tap to grant All Files Access so imported photos are wiped from Samsung Gallery & My Files.",
+                                            fontSize = 11.sp,
                                             color = Color(0xFF94A3B8)
                                         )
                                     }
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(
-                                        text = "Enable",
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color(0xFF38BDF8)
-                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Button(
+                                        onClick = {
+                                            context.startActivity(repository.getAllFilesAccessIntent(context))
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF38BDF8)),
+                                        shape = RoundedCornerShape(16.dp),
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                                    ) {
+                                        Text("Enable", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
+                                    }
                                 }
                             }
                         }
@@ -452,14 +470,14 @@ fun VaultScreen(
                             .fillMaxSize()
                             .padding(14.dp)
                     ) {
-                        // Permission Banner: Auto-Delete from Gallery
+                        // Permission Banner: If All Files Access is missing, show prominent button
                         if (!hasAllFilesAccess) {
                             Surface(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(bottom = 12.dp)
                                     .clickable {
-                                        context.startActivity(repository.getAllFilesAccessIntent())
+                                        context.startActivity(repository.getAllFilesAccessIntent(context))
                                     },
                                 shape = RoundedCornerShape(12.dp),
                                 color = Color(0xFF1E293B),
@@ -473,29 +491,33 @@ fun VaultScreen(
                                         Icons.Default.Info,
                                         contentDescription = null,
                                         tint = Color(0xFF38BDF8),
-                                        modifier = Modifier.size(22.dp)
+                                        modifier = Modifier.size(24.dp)
                                     )
                                     Spacer(modifier = Modifier.width(10.dp))
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(
                                             text = "Auto-Delete from Gallery",
-                                            fontSize = 12.sp,
+                                            fontSize = 13.sp,
                                             fontWeight = FontWeight.Bold,
                                             color = Color.White
                                         )
                                         Text(
-                                            text = "Tap to grant All Files Access so imported media is deleted from Gallery & My Files.",
-                                            fontSize = 10.sp,
+                                            text = "Tap to grant All Files Access so imported videos are wiped from Samsung Gallery & My Files.",
+                                            fontSize = 11.sp,
                                             color = Color(0xFF94A3B8)
                                         )
                                     }
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(
-                                        text = "Enable",
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color(0xFF38BDF8)
-                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Button(
+                                        onClick = {
+                                            context.startActivity(repository.getAllFilesAccessIntent(context))
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF38BDF8)),
+                                        shape = RoundedCornerShape(16.dp),
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                                    ) {
+                                        Text("Enable", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
+                                    }
                                 }
                             }
                         }
@@ -604,31 +626,39 @@ fun VaultScreen(
         }
     }
 
-    // Confirmation / Guide Dialog when originals cannot be deleted automatically without All Files Access
+    // Interactive Dialog when system permissions require manual confirmation
     pendingDeleteDialog?.let { result ->
         AlertDialog(
             onDismissRequest = { pendingDeleteDialog = null },
             title = {
                 Text(
-                    text = "Hide from Gallery & Files?",
+                    text = "Delete Originals from Gallery?",
                     color = Color.White,
                     fontWeight = FontWeight.Bold,
                     fontSize = 16.sp
                 )
             },
             text = {
-                Text(
-                    text = "Your media (${result.count} item(s)) is now safely encrypted in Calculator Vault!\n\nTo make them completely invisible to other people, allow 'All files access' so Calculator Vault can remove the unencrypted original files from your Samsung Gallery & My Files.",
-                    color = Color(0xFFCBD5E1),
-                    fontSize = 13.sp,
-                    lineHeight = 18.sp
-                )
+                Column {
+                    Text(
+                        text = "Your media (${result.count} item(s)) is now safely encrypted in Calculator Vault.",
+                        color = Color(0xFFCBD5E1),
+                        fontSize = 13.sp
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "To hide them from Samsung Gallery and My Files, grant 'All files access' or allow Calculator Vault to delete the original unencrypted files.",
+                        color = Color(0xFF94A3B8),
+                        fontSize = 12.sp,
+                        lineHeight = 16.sp
+                    )
+                }
             },
             confirmButton = {
                 Button(
                     onClick = {
                         pendingDeleteDialog = null
-                        context.startActivity(repository.getAllFilesAccessIntent())
+                        context.startActivity(repository.getAllFilesAccessIntent(context))
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981))
                 ) {
@@ -979,7 +1009,7 @@ private fun loadSampledBitmap(path: String, reqWidth: Int, reqHeight: Int): Bitm
         val height = options.outHeight
         val width = options.outWidth
 
-        if (height > reqHeight || width > reqWidth) {
+        if (height > reqWidth || width > reqWidth) {
             val halfHeight = height / 2
             val halfWidth = width / 2
             while ((halfHeight / inSampleSize) >= reqHeight && (halfWidth / inSampleSize) >= reqWidth) {
