@@ -66,10 +66,12 @@ data class ImportedItemInfo(
 
 data class ImportResult(
     val count: Int,
-    val deletedDirectlyCount: Int,
+    val deletedOriginalsCount: Int,
     val pendingDeleteMediaStoreUris: List<Uri>,
     val items: List<ImportedItemInfo>
-)
+) {
+    val deletedDirectlyCount: Int get() = deletedOriginalsCount
+}
 
 class MediaVaultRepository private constructor(context: Context) {
 
@@ -223,7 +225,7 @@ class MediaVaultRepository private constructor(context: Context) {
 
         ImportResult(
             count = importedCount,
-            deletedDirectlyCount = deletedDirectlyCount,
+            deletedOriginalsCount = deletedDirectlyCount,
             pendingDeleteMediaStoreUris = mediaStoreUrisToDelete.distinct(),
             items = importedItems
         )
