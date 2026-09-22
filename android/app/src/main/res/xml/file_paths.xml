@@ -3,4 +3,6 @@
     <files-path name="vault_photos" path="vault_photos/" />
     <files-path name="vault_videos" path="vault_videos/" />
     <files-path name="vault_media" path="." />
+    <cache-path name="vault_cache" path="." />
+    <cache-path name="vault_playback" path="vault_playback/" />
 </paths>

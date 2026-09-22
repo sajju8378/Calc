@@ -278,7 +278,7 @@ fun VaultScreen(
                             }
                         ) {
                             Icon(
-                                Icons.Default.DeleteSweep,
+                                Icons.Default.Delete,
                                 contentDescription = "Purge Gallery Originals",
                                 tint = Color(0xFFD97706)
                             )
@@ -721,7 +721,7 @@ fun VaultScreen(
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(12.dp)
                         ) {
-                            Icon(Icons.Default.DeleteSweep, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
                             Text("Remove Original from Samsung Gallery", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         }
@@ -860,7 +860,7 @@ fun VaultScreen(
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(12.dp)
                         ) {
-                            Icon(Icons.Default.DeleteSweep, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
                             Text("Remove Original from Samsung Gallery", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         }
@@ -1037,7 +1037,7 @@ fun VideoListRow(
         }
 
         IconButton(onClick = onPlay) {
-            Icon(Icons.Default.PlayCircle, contentDescription = "Play", tint = Color(0xFF10B981))
+            Icon(Icons.Default.PlayArrow, contentDescription = "Play", tint = Color(0xFF10B981))
         }
     }
 }
