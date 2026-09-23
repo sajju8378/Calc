@@ -852,7 +852,8 @@ class MediaVaultRepository private constructor(context: Context) {
         return size
     }
 
-    private fun queryDataColumn(uri: Uri): String? {
+    private fun queryDataColumn(uri: Uri?): String? {
+        if (uri == null) return null
         try {
             val proj = arrayOf(MediaStore.MediaColumns.DATA)
             appContext.contentResolver.query(uri, proj, null, null, null)?.use { cursor ->
