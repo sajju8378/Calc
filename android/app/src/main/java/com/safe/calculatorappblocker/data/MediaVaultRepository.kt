@@ -193,7 +193,7 @@ class MediaVaultRepository private constructor(context: Context) {
                 if (targetFile.exists() && targetFile.length() > 0) {
                     importedCount++
 
-                    // 2. Resolve original disk path and MediaStore row
+                    // 2. Resolve original disk path and real MediaStore row
                     val (resolvedPath, resolvedMsUri) = resolveOriginalMediaLocation(uri, displayName, fileSize, isVideo)
                     Log.d(TAG, "Encrypted $displayName -> Path: $resolvedPath, MsUri: $resolvedMsUri")
 
@@ -206,15 +206,81 @@ class MediaVaultRepository private constructor(context: Context) {
                     )
                     importedItems.add(itemInfo)
 
+                    // 3. Attempt direct removal from Samsung Gallery / MediaStore and disk
+                    var wasDeletedDirectly = false
+
+                    // A: Direct delete via ContentResolver on resolved MediaStore URI
                     if (resolvedMsUri != null) {
-                        mediaStoreUrisToDelete.add(resolvedMsUri)
+                        try {
+                            val rows = appContext.contentResolver.delete(resolvedMsUri, null, null)
+                            Log.d(TAG, "contentResolver.delete($resolvedMsUri) -> rows=$rows")
+                            if (rows > 0) {
+                                wasDeletedDirectly = true
+                            }
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Direct contentResolver.delete on $resolvedMsUri threw: ${e.message}")
+                        }
                     }
 
-                    // 3. Delete physical original from /DCIM/Camera or /Pictures if accessible
-                    if (canDeleteDirectly && !resolvedPath.isNullOrBlank()) {
-                        val deleted = deletePhysicalFile(resolvedPath)
-                        if (deleted) {
-                            deletedDirectlyCount++
+                    // B: Direct delete on original picker URI (works on some SAF / file URIs)
+                    try {
+                        val rows = appContext.contentResolver.delete(uri, null, null)
+                        if (rows > 0) {
+                            wasDeletedDirectly = true
+                        }
+                    } catch (e: Exception) {
+                        // Expected on read-only picker URIs
+                    }
+
+                    // C: Direct physical file deletion if MANAGE_EXTERNAL_STORAGE is granted
+                    if (canDeleteDirectly) {
+                        if (!resolvedPath.isNullOrBlank()) {
+                            try {
+                                val f = File(resolvedPath)
+                                if (f.exists() && f.delete()) {
+                                    Log.d(TAG, "Direct File.delete($resolvedPath) succeeded")
+                                    wasDeletedDirectly = true
+                                    MediaScannerConnection.scanFile(appContext, arrayOf(resolvedPath), null, null)
+                                }
+                            } catch (e: Exception) {
+                                Log.w(TAG, "File.delete failed for $resolvedPath", e)
+                            }
+                        }
+
+                        // Also search standard camera/pictures folders for exact name + size match
+                        val cameraDirs = listOf(
+                            File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM), "Camera"),
+                            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM),
+                            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
+                            File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), "Screenshots"),
+                            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+                            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES)
+                        )
+                        for (cdir in cameraDirs) {
+                            val cf = File(cdir, displayName)
+                            if (cf.exists() && cf.isFile && (fileSize <= 0 || cf.length() == fileSize)) {
+                                try {
+                                    if (cf.delete()) {
+                                        Log.d(TAG, "Direct File.delete(${cf.absolutePath}) succeeded")
+                                        wasDeletedDirectly = true
+                                        MediaScannerConnection.scanFile(appContext, arrayOf(cf.absolutePath), null, null)
+                                    }
+                                } catch (e: Exception) {
+                                    // ignore
+                                }
+                            }
+                        }
+                    }
+
+                    if (wasDeletedDirectly) {
+                        deletedDirectlyCount++
+                        if (!resolvedPath.isNullOrBlank()) {
+                            MediaScannerConnection.scanFile(appContext, arrayOf(resolvedPath), null, null)
+                        }
+                    } else {
+                        // Queue for system delete request if direct delete didn't remove it
+                        if (resolvedMsUri != null) {
+                            mediaStoreUrisToDelete.add(resolvedMsUri)
                         }
                     }
                 }
@@ -432,40 +498,62 @@ class MediaVaultRepository private constructor(context: Context) {
         }
     }
 
+    private fun isRealMediaStoreUri(uri: Uri): Boolean {
+        val s = uri.toString()
+        return (s.startsWith("content://media/external/images/media/") ||
+                s.startsWith("content://media/external/video/media/") ||
+                s.startsWith("content://media/external/file/") ||
+                s.startsWith("content://media/external_primary/images/media/") ||
+                s.startsWith("content://media/external_primary/video/media/"))
+    }
+
     /**
      * Finds the MediaStore URI for a photo/video currently in the vault
      * so it can be wiped from Samsung Gallery if the original wasn't deleted earlier.
      */
     suspend fun findMediaStoreUriForVaultItem(item: VaultMediaItem): Uri? = withContext(Dispatchers.IO) {
         val cleanName = item.displayName
-        val collection = if (item.isVideo) {
-            MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+        val collections = if (item.isVideo) {
+            listOf(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, MediaStore.Files.getContentUri("external"))
         } else {
-            MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+            listOf(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, MediaStore.Files.getContentUri("external"))
         }
         val proj = arrayOf(MediaStore.MediaColumns._ID)
         val sel = "${MediaStore.MediaColumns.DISPLAY_NAME} = ?"
-        try {
-            appContext.contentResolver.query(collection, proj, sel, arrayOf(cleanName), null)?.use { cursor ->
-                if (cursor.moveToFirst()) {
-                    val id = cursor.getLong(0)
-                    return@withContext ContentUris.withAppendedId(collection, id)
+        for (collection in collections) {
+            try {
+                appContext.contentResolver.query(collection, proj, sel, arrayOf(cleanName), null)?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        val id = cursor.getLong(0)
+                        return@withContext ContentUris.withAppendedId(collection, id)
+                    }
                 }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed finding media store uri for ${item.displayName}", e)
             }
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed finding media store uri for ${item.displayName}", e)
         }
 
-        try {
-            val filesCollection = MediaStore.Files.getContentUri("external")
-            appContext.contentResolver.query(filesCollection, proj, sel, arrayOf(cleanName), null)?.use { cursor ->
-                if (cursor.moveToFirst()) {
-                    val id = cursor.getLong(0)
-                    return@withContext ContentUris.withAppendedId(filesCollection, id)
+        val searchDirs = listOf(
+            File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM), "Camera"),
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM),
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES)
+        )
+        for (dir in searchDirs) {
+            val candidate = File(dir, cleanName)
+            if (candidate.exists() && candidate.isFile) {
+                try {
+                    val filesCollection = MediaStore.Files.getContentUri("external")
+                    appContext.contentResolver.query(filesCollection, proj, "${MediaStore.MediaColumns.DATA} = ?", arrayOf(candidate.absolutePath), null)?.use { cursor ->
+                        if (cursor.moveToFirst()) {
+                            val id = cursor.getLong(0)
+                            return@withContext ContentUris.withAppendedId(filesCollection, id)
+                        }
+                    }
+                } catch (e: Exception) {
+                    // ignore
                 }
             }
-        } catch (e: Exception) {
-            // ignore
         }
 
         null
@@ -489,6 +577,55 @@ class MediaVaultRepository private constructor(context: Context) {
         }
         val msUri = findMediaStoreUriForVaultItem(item)
         msUri != null
+    }
+
+    suspend fun deleteGalleryOriginal(item: VaultMediaItem): Boolean = withContext(Dispatchers.IO) {
+        var deleted = false
+        val msUri = findMediaStoreUriForVaultItem(item)
+        if (msUri != null) {
+            try {
+                val rows = appContext.contentResolver.delete(msUri, null, null)
+                if (rows > 0) {
+                    deleted = true
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "deleteGalleryOriginal failed on $msUri", e)
+            }
+        }
+
+        val cleanName = item.displayName
+        val searchDirs = listOf(
+            File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM), "Camera"),
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM),
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
+            File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), "Screenshots"),
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES)
+        )
+        for (dir in searchDirs) {
+            val candidate = File(dir, cleanName)
+            if (candidate.exists() && candidate.isFile) {
+                try {
+                    if (candidate.delete()) {
+                        deleted = true
+                        MediaScannerConnection.scanFile(appContext, arrayOf(candidate.absolutePath), null, null)
+                    }
+                } catch (e: Exception) {
+                    // ignore
+                }
+            }
+        }
+        deleted
+    }
+
+    suspend fun purgeOriginalsFromGallery(items: List<VaultMediaItem>): Int = withContext(Dispatchers.IO) {
+        var count = 0
+        for (item in items) {
+            if (deleteGalleryOriginal(item)) {
+                count++
+            }
+        }
+        count
     }
 
     private fun deletePhysicalFile(path: String): Boolean {
@@ -521,7 +658,7 @@ class MediaVaultRepository private constructor(context: Context) {
             foundPath = uri.path
         }
 
-        if (uri.authority?.contains("media") == true && !DocumentsContract.isDocumentUri(appContext, uri)) {
+        if (isRealMediaStoreUri(uri)) {
             foundMediaStoreUri = uri
             foundPath = queryDataColumn(uri)
         }
@@ -563,13 +700,29 @@ class MediaVaultRepository private constructor(context: Context) {
             }
         }
 
+        // Check if URI last segment is numeric ID
+        if (foundMediaStoreUri == null && uri.lastPathSegment?.toLongOrNull() != null) {
+            val candidateId = uri.lastPathSegment!!.toLong()
+            val collection = if (isVideo) {
+                MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+            } else {
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+            }
+            val candidateUri = ContentUris.withAppendedId(collection, candidateId)
+            val testPath = queryDataColumn(candidateUri)
+            if (!testPath.isNullOrBlank()) {
+                foundMediaStoreUri = candidateUri
+                foundPath = testPath
+            }
+        }
+
         // Query MediaStore by DisplayName if not resolved yet
-        if (displayName.isNotBlank()) {
+        if (foundMediaStoreUri == null && displayName.isNotBlank()) {
             try {
-                val collection = if (isVideo) {
-                    MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
+                val collections = if (isVideo) {
+                    listOf(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, MediaStore.Files.getContentUri("external"))
                 } else {
-                    MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
+                    listOf(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, MediaStore.Files.getContentUri("external"))
                 }
                 val proj = arrayOf(
                     MediaStore.MediaColumns._ID,
@@ -579,22 +732,25 @@ class MediaVaultRepository private constructor(context: Context) {
                 val selection = "${MediaStore.MediaColumns.DISPLAY_NAME} = ?"
                 val selectionArgs = arrayOf(displayName)
 
-                appContext.contentResolver.query(collection, proj, selection, selectionArgs, null)?.use { cursor ->
-                    while (cursor.moveToNext()) {
-                        val id = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID))
-                        val path = cursor.getString(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATA))
-                        val size = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE))
+                for (collection in collections) {
+                    appContext.contentResolver.query(collection, proj, selection, selectionArgs, null)?.use { cursor ->
+                        while (cursor.moveToNext()) {
+                            val id = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID))
+                            val path = cursor.getString(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATA))
+                            val size = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE))
 
-                        val msUri = ContentUris.withAppendedId(collection, id)
-                        if (foundMediaStoreUri == null) foundMediaStoreUri = msUri
-                        if (foundPath == null && !path.isNullOrBlank()) foundPath = path
+                            val msUri = ContentUris.withAppendedId(collection, id)
+                            if (foundMediaStoreUri == null) foundMediaStoreUri = msUri
+                            if (foundPath == null && !path.isNullOrBlank()) foundPath = path
 
-                        if (fileSize > 0 && size == fileSize) {
-                            foundMediaStoreUri = msUri
-                            if (!path.isNullOrBlank()) foundPath = path
-                            break
+                            if (fileSize > 0 && size == fileSize) {
+                                foundMediaStoreUri = msUri
+                                if (!path.isNullOrBlank()) foundPath = path
+                                break
+                            }
                         }
                     }
+                    if (foundMediaStoreUri != null) break
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "MediaStore lookup failed", e)
@@ -618,6 +774,24 @@ class MediaVaultRepository private constructor(context: Context) {
                     foundPath = candidate.absolutePath
                     break
                 }
+            }
+        }
+
+        // If we found a disk path but not a MediaStore URI, query MediaStore by DATA path
+        if (foundMediaStoreUri == null && !foundPath.isNullOrBlank()) {
+            try {
+                val filesCollection = MediaStore.Files.getContentUri("external")
+                val proj = arrayOf(MediaStore.MediaColumns._ID)
+                val sel = "${MediaStore.MediaColumns.DATA} = ?"
+                appContext.contentResolver.query(filesCollection, proj, sel, arrayOf(foundPath), null)?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        val id = cursor.getLong(0)
+                        val baseCol = if (isVideo) MediaStore.Video.Media.EXTERNAL_CONTENT_URI else MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+                        foundMediaStoreUri = ContentUris.withAppendedId(baseCol, id)
+                    }
+                }
+            } catch (e: Exception) {
+                // ignore
             }
         }
 

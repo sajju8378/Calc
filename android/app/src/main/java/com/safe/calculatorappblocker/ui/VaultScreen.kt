@@ -128,9 +128,9 @@ fun VaultScreen(
     }
 
     fun handlePostImport(result: ImportResult) {
-        // PRIORITIZE MediaStore system delete request!
-        // On Android 11/12 (Samsung Galaxy M31 / One UI), this is the ONLY method
-        // that triggers Samsung Gallery to update and immediately erase the thumbnail!
+        // PRIORITIZE MediaStore system delete request if any items could not be deleted directly!
+        // On Android 11/12 (Samsung Galaxy M31 / One UI), this triggers Samsung's native confirmation dialog:
+        // "Allow Calculator Vault to delete this photo from your device?"
         if (result.pendingDeleteMediaStoreUris.isNotEmpty()) {
             val deleteIntent = repository.createMediaStoreDeleteRequest(result.pendingDeleteMediaStoreUris)
             if (deleteIntent != null) {
@@ -140,7 +140,7 @@ fun VaultScreen(
                     )
                     return
                 } catch (e: Exception) {
-                    // Fallback to dialog
+                    Log.e("VaultScreen", "Failed launching delete request", e)
                 }
             }
         }
@@ -148,7 +148,7 @@ fun VaultScreen(
         if (result.deletedOriginalsCount > 0) {
             Toast.makeText(
                 context,
-                "Locked ${result.count} item(s) in Vault!",
+                "✓ Locked ${result.count} item(s) in Vault! Original permanently deleted from Samsung Gallery.",
                 Toast.LENGTH_LONG
             ).show()
         } else {
@@ -255,6 +255,14 @@ fun VaultScreen(
                             onClick = {
                                 coroutineScope.launch {
                                     val currentList = if (selectedTab == VaultTab.PHOTOS) photos else videos
+                                    if (repository.hasAllFilesAccess()) {
+                                        val purged = repository.purgeOriginalsFromGallery(currentList)
+                                        if (purged > 0) {
+                                            Toast.makeText(context, "✓ Permanently removed $purged original(s) from Samsung Gallery!", Toast.LENGTH_LONG).show()
+                                            refreshMedia()
+                                            return@launch
+                                        }
+                                    }
                                     val urisToPurge = mutableListOf<Uri>()
                                     for (item in currentList) {
                                         val msUri = repository.findMediaStoreUriForVaultItem(item)
@@ -703,6 +711,15 @@ fun VaultScreen(
                         Button(
                             onClick = {
                                 coroutineScope.launch {
+                                    if (repository.hasAllFilesAccess()) {
+                                        val deleted = repository.deleteGalleryOriginal(photo)
+                                        if (deleted) {
+                                            originalExistsInGallery = false
+                                            Toast.makeText(context, "✓ Original permanently removed from Samsung Gallery!", Toast.LENGTH_SHORT).show()
+                                            refreshMedia()
+                                            return@launch
+                                        }
+                                    }
                                     val msUri = repository.findMediaStoreUriForVaultItem(photo)
                                     if (msUri != null) {
                                         val deleteIntent = repository.createMediaStoreDeleteRequest(listOf(msUri))
@@ -711,6 +728,8 @@ fun VaultScreen(
                                             deleteRequestLauncher.launch(
                                                 IntentSenderRequest.Builder(deleteIntent.intentSender).build()
                                             )
+                                        } else {
+                                            Toast.makeText(context, "Please grant All Files Access to delete original.", Toast.LENGTH_LONG).show()
                                         }
                                     } else {
                                         Toast.makeText(context, "Could not locate gallery entry", Toast.LENGTH_SHORT).show()
@@ -842,6 +861,15 @@ fun VaultScreen(
                         Button(
                             onClick = {
                                 coroutineScope.launch {
+                                    if (repository.hasAllFilesAccess()) {
+                                        val deleted = repository.deleteGalleryOriginal(video)
+                                        if (deleted) {
+                                            originalExistsInGallery = false
+                                            Toast.makeText(context, "✓ Original permanently removed from Samsung Gallery!", Toast.LENGTH_SHORT).show()
+                                            refreshMedia()
+                                            return@launch
+                                        }
+                                    }
                                     val msUri = repository.findMediaStoreUriForVaultItem(video)
                                     if (msUri != null) {
                                         val deleteIntent = repository.createMediaStoreDeleteRequest(listOf(msUri))
@@ -850,6 +878,8 @@ fun VaultScreen(
                                             deleteRequestLauncher.launch(
                                                 IntentSenderRequest.Builder(deleteIntent.intentSender).build()
                                             )
+                                        } else {
+                                            Toast.makeText(context, "Please grant All Files Access to delete original.", Toast.LENGTH_LONG).show()
                                         }
                                     } else {
                                         Toast.makeText(context, "Could not locate gallery entry", Toast.LENGTH_SHORT).show()
